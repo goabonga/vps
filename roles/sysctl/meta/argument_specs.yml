@@ -71,6 +71,7 @@ argument_specs:
         choices:
           - security
           - network
+          - memory
         default: []
         description:
           - Named sets of parameters to manage in addition to
@@ -85,6 +86,11 @@ argument_specs:
             (C(net.core.somaxconn), C(net.ipv4.tcp_max_syn_backlog) and
             C(net.core.netdev_max_backlog)) for a host that serves many
             clients. They are only ceilings, and nothing is allocated before use.
+          - C(memory) tunes the memory for a server. It swaps less
+            (C(vm.swappiness) 10), keeps the file metadata caches longer
+            (C(vm.vfs_cache_pressure) 50) and flushes dirty pages earlier and
+            in smaller batches (C(vm.dirty_background_ratio) 5 and
+            C(vm.dirty_ratio) 15). It leaves C(vm.overcommit_memory) alone.
           - Stricter values are not part of the profile. Set them in
             C(sysctl_parameters) when they suit the host. In
             C(kernel.kptr_restrict) 2 hides the pointers even from root
