@@ -36,6 +36,8 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix`, `docs` 
 - `signatures`: signed commits and their checks (the `signatures`,
   `resign` and `resign-main` workflows).
 - `ansible`: the plan and apply workflows of the Ansible deployment and what they need to run.
+- `github`: the GitHub repository settings and the ci workflow
+  (`.github/rulesets/`, branch protection, `ci.yml`, `scripts/summary.sh`).
 
 ### Environments
 
@@ -95,8 +97,9 @@ deployment" in the [README](README.md).
 
 Every commit that reaches `main` must be signed. If a pull request fails the
 `signatures` check, ask the owner to add the `resign` label: the pipeline
-re-signs the commits. See "Branch protection and signed
-commits" in the [README](README.md).
+re-signs the commits. The `lint`, `syntax`, `collection`, `workflows`,
+`audit` and `multicz` checks must pass too (see "Branch protection and signed
+commits" in the [README](README.md)).
 
 ## Reporting bugs and asking for features
 

@@ -193,7 +193,20 @@ only deploy the inventories that have this file.
 
 ## Branch protection and signed commits
 
-Only signed commits should reach `main`.
+Only signed commits should reach `main`. The rulesets in
+`.github/rulesets/` protect `main` (pull request, the `lint`, `syntax`, `collection`,
+`workflows`, `audit`, `multicz` and `signatures` checks, signed commits, no
+force push or deletion) and the
+`ansible/*` branches (pull request, signed commits, no force push or
+deletion). Repository admins bypass them, so the pipelines can push
+releases with the personal access token.
+
+Apply them (idempotent) with `gh`; this needs a plan that supports rulesets
+on private repositories, or a public repository:
+
+```sh
+scripts/apply-rulesets.sh
+```
 
 The `signatures` check fails on a pull request containing a commit that
 GitHub does not show as verified. Add the `resign` label to the pull

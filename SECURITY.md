@@ -24,5 +24,5 @@ key, personal access token, GPG key) live in GitHub secrets, scoped to the
 `ansible-production-apply` and `ansible-production-plan` environments when they allow it. They are
 never committed: report any trace of one in the history or in a log.
 
-Only signed commits should reach `main`, so a change is traceable to a key.
-Report any commit that seems to bypass this.
+`main` and the `ansible/*` branches only accept signed commits, so a change is
+traceable to a key. Report any commit that seems to bypass this.
