@@ -24,6 +24,10 @@ bootstrap:
   order_project: ~
   user_description: ovh-tf
   bucket_versioning: true
+  # plans_retention_days - the plans stored under plans/ in the bucket by the
+  # terragrunt-plan workflow are deleted after this many days (the states are
+  # not concerned). `~` keeps them forever.
+  plans_retention_days: 7
   # oauth2_client - OAuth2 service account (client credentials) used by the
   # day-to-day Terragrunt runs, so they do not need the bootstrap credentials.
   # `~` creates none. It has no right until iam_policies grants some.
