@@ -1,0 +1,94 @@
+# Version of what is applied on this environment, written by the release
+# of the terragrunt-production component after each successful apply.
+version: 0.0.0
+ovh:
+  # endpoint - OVHcloud API (ovh-eu, ovh-ca, ovh-us). Credentials are read
+  # from OVH_APPLICATION_KEY / OVH_APPLICATION_SECRET / OVH_CONSUMER_KEY,
+  # never committed.
+  endpoint: ovh-eu
+remote_state:
+  # OVHcloud Object Storage bucket (S3 API), to be created beforehand.
+  # Credentials via AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+  bucket: infra-ovh-tfstate
+  region: gra
+  endpoint: https://s3.gra.io.cloud.ovh.net/
+bootstrap:
+  # Keys = variables of modules/bootstrap/variables.tf. The state bucket
+  # itself is remote_state.bucket / remote_state.region above.
+  # project_id - id of an existing Public Cloud project: not stored here, it
+  # comes from OVH_PROJECT_ID (infra/.env). Leave OVH_PROJECT_ID empty and fill
+  # order_project instead to have Terraform order a new project.
+  # order_project - orders a new project (needs a default payment method):
+  #   description: ovh-tf
+  #   ovh_subsidiary: FR        # optional, defaults to the account's
+  order_project: ~
+  user_description: ovh-tf
+  bucket_versioning: true
+  # oauth2_client - OAuth2 service account (client credentials) used by the
+  # day-to-day Terragrunt runs, so they do not need the bootstrap credentials.
+  # `~` creates none. It has no right until iam_policies grants some.
+  oauth2_client:
+    name: ovh-tf
+  # iam_policies - what the OAuth2 client may do: resource URNs and IAM
+  # actions. NOT VERIFIED against the IAM reference: check the action names
+  # with GET /iam/reference/action?resourceType=<type> in the API console.
+  iam_policies:
+    vps:
+      resources: ["urn:v1:eu:resource:vps:*"]
+      allow: ["vps:apiovh:*"]
+    ip:
+      resources: ["urn:v1:eu:resource:ip:*"]
+      allow: ["ip:apiovh:*"]
+vps:
+  # Keys = variables of modules/vps/variables.tf. `~` (null) = unmanaged.
+  # Values read from the state after the import.
+
+  # --- manageable ---
+  display_name: vps-d968375f.vps.ovh.net
+  # keymap - KVM keyboard layout (fr, us...). Not read back on import.
+  keymap: ~
+  # netboot_mode - local or rescue.
+  netboot_mode: local
+  sla_monitoring: false
+  # state - running, stopped... (the provider starts/stops the VPS).
+  state: running
+
+  # --- ordered offer (read-only in practice: keep the values from the
+  # state, otherwise they show as a diff) ---
+  name: vps-d968375f.vps.ovh.net
+  offer_type: ssd
+  zone: "Region OpenStack: os-sbg6"
+  vcore: 4
+  memory_limit: 8192
+  monitoring_ip_blocks: []
+  model:
+    available_options: []
+    datacenter: []
+    disk: 75
+    maximum_additionnal_ip: 16
+    memory: 8192
+    name: vps-2025-model1
+    offer: VPS-1 2026
+    vcore: 4
+    version: 2025v1
+
+  # --- order / reinstall (ignored once the VPS exists, except image_id:
+  # setting or changing it REINSTALLS the VPS) ---
+  image_id: ~
+  ovh_subsidiary: ~
+  public_ssh_key: ~
+  do_not_send_password: ~
+  plan: ~
+  plan_option: ~
+
+  # --- reverse DNS ---
+  # Key = IP address of the VPS (`ips` output), `reverse` = wanted hostname.
+  # `ip` = CIDR block of the address, defaults to <address>/32 (IPv4) or
+  # /128 (IPv6). The hostname must already resolve to the IP (A/AAAA),
+  # otherwise OVHcloud refuses it.
+  reverse_dns:
+    51.178.51.89:
+      reverse: goabonga.com
+    # IPv6: the key must be quoted, the block defaults to <address>/128.
+    "2001:41d0:404:200::6e32":
+      reverse: goabonga.com
