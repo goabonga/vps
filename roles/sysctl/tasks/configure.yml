@@ -20,7 +20,7 @@
     sysctl_set: true
     sysctl_file: "{{ sysctl_config_file if sysctl_persistent | bool else sysctl_runtime_file }}"
     reload: false
-  loop: "{{ sysctl_parameters | dict2items | sort(attribute='key') }}"
+  loop: "{{ sysctl_effective | dict2items | sort(attribute='key') }}"
   loop_control:
     label: "{{ item.key }}"
   become: true

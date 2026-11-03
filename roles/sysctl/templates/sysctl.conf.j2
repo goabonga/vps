@@ -2,6 +2,6 @@
 # Collection: goabonga.vps
 # Role: sysctl
 
-{% for name, value in sysctl_parameters | dictsort %}
+{% for name, value in sysctl_effective | dictsort %}
 {{ name }} = {{ value }}
 {% endfor %}

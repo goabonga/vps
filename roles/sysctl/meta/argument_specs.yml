@@ -53,3 +53,14 @@ argument_specs:
             list of the ones that differ from their desired value.
           - Without C(sysctl_apply) it reports the drift of the running kernel
             without changing it.
+      sysctl_strict:
+        type: bool
+        default: true
+        description:
+          - Fail, before any change, when a parameter does not exist in the
+            running kernel.
+          - When false such a parameter is skipped with a warning, and is
+            neither applied nor written to the configuration file.
+          - The check only tells that the parameter exists in the running
+            kernel, not that the kernel accepts the value. A parameter that a
+            kernel module provides is reported while the module is not loaded.

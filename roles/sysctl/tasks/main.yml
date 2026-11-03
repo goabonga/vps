@@ -5,12 +5,15 @@
     - name: Check the host and the variables
       ansible.builtin.include_tasks: validate.yml
 
+    - name: Look for the parameters in the running kernel
+      ansible.builtin.include_tasks: support.yml
+
     - name: Configure the kernel parameters
       ansible.builtin.include_tasks: configure.yml
-      when: sysctl_parameters | length > 0
+      when: sysctl_effective | length > 0
 
     - name: Verify the running kernel
       ansible.builtin.include_tasks: verify.yml
       when:
-        - sysctl_parameters | length > 0
+        - sysctl_effective | length > 0
         - sysctl_verify | bool

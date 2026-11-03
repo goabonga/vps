@@ -1,0 +1,41 @@
+---
+# Looks for every parameter in the running kernel and builds
+# sysctl_effective, the parameters the role manages. Nothing is changed.
+# This only tells whether the parameter exists in the running kernel: whether
+# the kernel accepts the value is known when it is applied or verified, and a
+# parameter provided by a kernel module that is not loaded is reported too.
+- name: Look for the parameters in the running kernel
+  ansible.builtin.stat:
+    path: "/proc/sys/{{ item.key | replace('.', '/') }}"
+  loop: "{{ sysctl_parameters | dict2items | sort(attribute='key') }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: sysctl_support
+
+- name: List the parameters that the running kernel does not have
+  ansible.builtin.set_fact:
+    sysctl_unsupported: "{{ sysctl_support.results | rejectattr('stat.exists') | map(attribute='item.key') | list }}"
+
+- name: Refuse unsupported parameters in strict mode
+  ansible.builtin.assert:
+    that:
+      - sysctl_unsupported | length == 0
+    fail_msg: >-
+      Unsupported sysctl parameters, not present in the running kernel:
+      {{ sysctl_unsupported | join(', ') }}. Set sysctl_strict to false to skip
+      them with a warning.
+    quiet: true
+  when: sysctl_strict | bool
+
+- name: Warn about the parameters that are skipped
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: skipping the sysctl parameters that are not present in the
+      running kernel: {{ sysctl_unsupported | join(', ') }}.
+  when:
+    - not (sysctl_strict | bool)
+    - sysctl_unsupported | length > 0
+
+- name: Keep the parameters to manage
+  ansible.builtin.set_fact:
+    sysctl_effective: "{{ sysctl_parameters | dict2items | rejectattr('key', 'in', sysctl_unsupported) | items2dict }}"

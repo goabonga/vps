@@ -20,3 +20,7 @@ sysctl_apply: true
 # Read the parameters back from the running kernel and fail when one differs
 # from its desired value.
 sysctl_verify: true
+
+# Fail when a parameter does not exist in the running kernel. When false the
+# role skips such a parameter with a warning.
+sysctl_strict: true

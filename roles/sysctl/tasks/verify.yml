@@ -4,7 +4,7 @@
 - name: Read the running values
   ansible.builtin.command:
     cmd: "sysctl -n {{ item.key }}"
-  loop: "{{ sysctl_parameters | dict2items | sort(attribute='key') }}"
+  loop: "{{ sysctl_effective | dict2items | sort(attribute='key') }}"
   loop_control:
     label: "{{ item.key }}"
   register: sysctl_read
