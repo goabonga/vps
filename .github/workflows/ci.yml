@@ -202,3 +202,30 @@ jobs:
         env:
           JOB_STATUS: ${{ job.status }}
         run: scripts/summary.sh "infra tests (tofu test)" "$JOB_STATUS" --file infra-test.txt --tail 60
+
+  infra-docs:
+    name: infra-docs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Install terraform-docs
+        shell: bash
+        env:
+          VERSION: v0.24.0
+          SHA256: 9005daf969de0b50134493a2c00078b49f5f5b39d021cda7c89bf4d4f3d776d3
+        run: |
+          curl -sSfL -o terraform-docs.tar.gz \
+            "https://github.com/terraform-docs/terraform-docs/releases/download/${VERSION}/terraform-docs-${VERSION}-linux-amd64.tar.gz"
+          echo "${SHA256}  terraform-docs.tar.gz" | sha256sum -c -
+          tar xzf terraform-docs.tar.gz terraform-docs
+          sudo install -m 755 terraform-docs /usr/local/bin/terraform-docs
+      - name: Check that the module docs are up to date
+        shell: bash
+        run: make -C infra docs-check 2>&1 | tee infra-docs.txt
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: scripts/summary.sh "infra docs (terraform-docs)" "$JOB_STATUS" --file infra-docs.txt
