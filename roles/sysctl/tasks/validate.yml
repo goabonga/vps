@@ -1,0 +1,15 @@
+---
+# The site playbook does not gather facts: the role asks for the few it needs.
+- name: Gather the minimal facts
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+
+- name: Check that the host runs Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Ubuntu'
+    fail_msg: >-
+      The sysctl role only supports Ubuntu, found
+      {{ ansible_facts['distribution'] }}.
+    quiet: true

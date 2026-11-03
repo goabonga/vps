@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: sysctl
+  author: Chris
+  description: Manages Linux kernel parameters (sysctl) declaratively, securely and idempotently.
+  license: MIT
+  min_ansible_version: "2.18"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - resolute
+  galaxy_tags:
+    - sysctl
+    - kernel
+dependencies: []

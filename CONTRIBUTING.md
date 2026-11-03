@@ -51,6 +51,8 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix`, `docs` 
 
 - `version`: the `version` role (`roles/version/` and its line in
   `playbooks/site.yml`).
+- `sysctl`: the `sysctl` role (`roles/sysctl/` and its line in
+  `playbooks/site.yml`).
 
 ## Checking a change
 

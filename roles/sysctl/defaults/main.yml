@@ -1,0 +1,7 @@
+---
+# Set to false to leave the host untouched.
+sysctl_enabled: true
+
+# Kernel parameters to manage, for example:
+#   vm.swappiness: 10
+sysctl_parameters: {}

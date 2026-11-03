@@ -1,0 +1,6 @@
+---
+- name: Manage the kernel parameters
+  when: sysctl_enabled | bool
+  block:
+    - name: Check the host and the variables
+      ansible.builtin.include_tasks: validate.yml

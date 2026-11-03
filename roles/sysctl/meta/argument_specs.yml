@@ -1,0 +1,22 @@
+---
+argument_specs:
+  main:
+    short_description: Manage Linux kernel parameters
+    description:
+      - Manages kernel parameters declaratively. With the default values the
+        role does nothing, and it changes the host only when parameters are
+        given.
+    options:
+      sysctl_enabled:
+        type: bool
+        default: true
+        description:
+          - When false the role does nothing, on the host as in its
+            persistent configuration.
+      sysctl_parameters:
+        type: dict
+        default: {}
+        description:
+          - Kernel parameters to manage, as a mapping from the parameter name
+            to its value.
+          - An empty mapping leaves the host untouched.
