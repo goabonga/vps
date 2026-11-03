@@ -1,0 +1,28 @@
+namespace: goabonga
+name: vps
+version: 0.0.0
+readme: README.md
+authors:
+  - Chris <goabonga@pm.me>
+description: Ansible automation for OVH VPS infrastructure.
+license:
+  - MIT
+repository: https://github.com/goabonga/vps
+issues: https://github.com/goabonga/vps/issues
+tags:
+  - infrastructure
+  - ovh
+  - vps
+build_ignore:
+  - .ansible
+  - .github
+  - .gitignore
+  - .venv
+  - collections
+  - CONTRIBUTING.md
+  - SECURITY.md
+  - .python-version
+  - ansible.cfg
+  - inventories
+  - pyproject.toml
+  - uv.lock
