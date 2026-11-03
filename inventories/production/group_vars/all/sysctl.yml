@@ -1,0 +1,8 @@
+---
+# Kernel parameters of the VPS: the profiles of the sysctl role. They were
+# tried on the development VM first.
+sysctl_profiles:
+  - security
+  - network
+  - memory
+  - filesystem
