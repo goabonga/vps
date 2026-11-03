@@ -152,3 +152,38 @@ resource "ovh_cloud_storage_object_bucket" "this" {
     ignore_changes = [object_lock]
   }
 }
+
+# --- retention of the stored plans -------------------------------------------
+
+# The plan workflows store the full plan of each run under plans/
+# (plans/<pipeline>-<env>/<run id>/plan.txt). Only that prefix is concerned: the states are
+# stored under <env>/. The bucket is versioned, so an expired plan first gets a
+# delete marker and its version goes one day later. The marker itself stays (it
+# weighs nothing): the API refuses a rule removing delete markers that has a
+# prefix filter, and such a rule without a filter would concern the states.
+resource "ovh_cloud_project_storage_object_bucket_lifecycle_configuration" "plans" {
+  count = var.plans_retention_days == null ? 0 : 1
+
+  service_name   = local.project_id
+  container_name = ovh_cloud_storage_object_bucket.this.name
+  region_name    = upper(var.bucket_region)
+
+  rules = [
+    {
+      id     = "expire-plans"
+      status = "enabled"
+      filter = {
+        prefix = "plans/"
+      }
+      expiration = {
+        days = var.plans_retention_days
+      }
+      noncurrent_version_expiration = {
+        noncurrent_days = 1
+      }
+      abort_incomplete_multipart_upload = {
+        days_after_initiation = 1
+      }
+    },
+  ]
+}

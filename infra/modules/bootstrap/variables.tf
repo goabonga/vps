@@ -49,6 +49,22 @@ variable "bucket_tags" {
   }
 }
 
+variable "plans_retention_days" {
+  description = <<-EOT
+    Days after which the plans stored under plans/ in the bucket are deleted
+    (the terragrunt-plan workflow writes them there). Their previous versions
+    go one day later. The states are never concerned. null keeps the plans
+    forever.
+  EOT
+  type        = number
+  default     = 7
+
+  validation {
+    condition     = var.plans_retention_days == null || try(var.plans_retention_days >= 1, false)
+    error_message = "plans_retention_days must be null or at least 1."
+  }
+}
+
 variable "user_description" {
   description = "Description of the user that accesses the bucket."
   type        = string
