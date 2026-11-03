@@ -38,6 +38,9 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix` and
 - `production`: `inventories/production/` (hosts, variables, the
   collection it pins).
 
+- `development`: `inventories/development/` and the script creating its
+  local VM.
+
 ### Roles
 
 - `version`: the `version` role (`roles/version/` and its line in

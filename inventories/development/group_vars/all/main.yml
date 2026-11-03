@@ -1,0 +1,7 @@
+---
+# Connection settings of the development VM. The key is generated once by
+# scripts/dev-vm.sh in .dev/ (not committed). The host key changes every time
+# the VM is recreated, so it is not checked for this environment only.
+ansible_user: ubuntu
+ansible_ssh_private_key_file: "{{ inventory_dir }}/../../.dev/ssh/id_ed25519"
+ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
