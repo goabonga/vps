@@ -36,3 +36,12 @@ copy the key using the password OVH sent by email:
 ```sh
 ssh-copy-id -i ~/.ssh/ovh_vps.pub ubuntu@<vps-ip>
 ```
+
+## Roles
+
+The `goabonga.vps` collection ships the roles, which the `goabonga.vps.site`
+playbook applies to every host.
+
+| Role | Description | Variables |
+| --- | --- | --- |
+| `version` | echoes the version being deployed on the host | `deployment_version`, set by the environment or passed with `-e` |
