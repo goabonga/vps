@@ -45,6 +45,7 @@ playbook applies to every host.
 | Role | Description | Variables |
 | --- | --- | --- |
 | `version` | echoes the version being deployed on the host | `deployment_version`, set by the environment or passed with `-e` |
+| `sysctl` | manages kernel parameters: validates them, writes them to a file of `/etc/sysctl.d`, applies and verifies them at runtime, with the `security`, `network`, `memory` and `filesystem` profiles; it does nothing until parameters or profiles are given | `sysctl_enabled`, `sysctl_parameters`, `sysctl_profiles`, `sysctl_persistent`, `sysctl_apply`, `sysctl_verify`, `sysctl_strict`, `sysctl_config_file`, described by `ansible-doc -t role goabonga.vps.sysctl` |
 
 ## Usage
 
