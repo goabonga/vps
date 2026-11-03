@@ -1,0 +1,354 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+# Runs `terragrunt plan` for every environment of `infra/configs/` once ci and
+# release succeeded on `main`.
+#
+# A deployment is pending when the plan reports changes OR when `main` differs
+# from `terragrunt/<env>` on the deployed paths (a first deployment starts from
+# a `terragrunt/<env>` branch created at the root commit). Then it opens or
+# updates a PR from `plan/terragrunt-<env>` into `terragrunt/<env>` plus a
+# tracking issue - merging that PR (once approved per the branch's protection
+# rules) triggers terragrunt-apply.yml, which closes the issue.
+#
+# The PR shows the plan summary and the commits and files not deployed yet. The
+# full plan holds resource attributes: it is stored in the private state bucket
+# (plans/terragrunt-<env>/<run id>/plan.txt), never in the PR, a log or an
+# artifact. Pull requests and issues are created with the GH_PAT personal access
+# token, never with github-actions[bot].
+
+name: terragrunt-plan
+
+on: # zizmor: ignore[dangerous-triggers]
+  # After the release workflow (itself chained after ci) succeeded on main,
+  # so the plan always sees the released main and never runs alongside ci.
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: terragrunt-plan-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  discover-envs:
+    name: discover-envs
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    outputs:
+      envs: ${{ steps.list.outputs.envs }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - id: list
+        run: |
+          set -euo pipefail
+          # An environment is an infra/configs/<env>/ directory holding a
+          # config.yaml.
+          envs=$(for f in infra/configs/*/config.yaml; do
+            basename "$(dirname "$f")"
+          done | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "envs=$envs" >> "$GITHUB_OUTPUT"
+          {
+            echo "## discover-envs"
+            echo
+            echo "Environments of \`infra/configs/\`:"
+            echo "$envs" | jq -r '.[] | "- `" + . + "`"'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  plan:
+    name: plan (${{ matrix.env }})
+    needs: [discover-envs]
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJson(needs.discover-envs.outputs.envs) }}
+    runs-on: ubuntu-24.04
+    # Own GitHub Environment (own secrets), so that protecting the apply
+    # environment with required reviewers does not block this automatic plan.
+    environment: terragrunt-${{ matrix.env }}-plan
+    steps:
+      - name: Require GH_PAT
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_PAT" ]; then
+            echo "::error::the GH_PAT secret (personal access token) is required"
+            exit 1
+          fi
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.13.2
+          tofu_wrapper: false
+      - uses: ./.github/actions/setup-terragrunt # zizmor: ignore[self-repository]
+
+      - name: Terragrunt plan
+        id: terragrunt
+        env:
+          ENV: ${{ matrix.env }}
+          OVH_CLIENT_ID: ${{ secrets.OVH_CLIENT_ID }}
+          OVH_CLIENT_SECRET: ${{ secrets.OVH_CLIENT_SECRET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          set +e
+          # The units are shared by the environments: ENV selects the
+          # configuration (infra/configs/<env>/config.yaml) and the state key.
+          terragrunt --non-interactive --no-color --working-dir infra/ovh \
+            run --all -- plan -detailed-exitcode -no-color -input=false \
+            > "plan-${ENV}.txt" 2>&1
+          rc=$?
+          # Keep what OpenTofu printed: no color, no Terragrunt log prefix.
+          sed -i -E 's/\x1b\[[0-9;]*m//g; s/^[0-9:.]+ (STDOUT|STDERR) (\[[^]]*\] )?tofu: //' "plan-${ENV}.txt"
+          # What main would change on the environment's terragrunt branch.
+          paths="infra/ovh infra/modules infra/configs/${ENV}"
+          drift=0
+          : > "commits-${ENV}.txt"
+          : > "stat-${ENV}.txt"
+          if git rev-parse --verify -q "origin/terragrunt/${ENV}" >/dev/null; then
+            # shellcheck disable=SC2086
+            git diff --quiet "origin/terragrunt/${ENV}" HEAD -- $paths || drift=1
+            # shellcheck disable=SC2086
+            git log --format='- %h %s' "origin/terragrunt/${ENV}..HEAD" -- $paths \
+              | head -n 30 > "commits-${ENV}.txt"
+            # shellcheck disable=SC2086
+            git diff --stat "origin/terragrunt/${ENV}" HEAD -- $paths > "stat-${ENV}.txt"
+          fi
+          # 0: nothing to do, 1: error, 2: changes or not deployed yet.
+          if [ "$rc" -eq 1 ]; then code=1
+          elif [ "$rc" -eq 2 ] || [ "$drift" -eq 1 ]; then code=2
+          else code=0; fi
+          {
+            echo "exit_code=$code"
+            echo "drift=$drift"
+          } >> "$GITHUB_OUTPUT"
+      - name: Show plan summary
+        # The "Plan: N to add..." lines and commit subjects only: the full
+        # plan holds resource attributes.
+        env:
+          ENV_NAME: ${{ matrix.env }}
+          DRIFT: ${{ steps.terragrunt.outputs.drift }}
+          EXIT_CODE: ${{ steps.terragrunt.outputs.exit_code }}
+        run: |
+          grep -E 'Plan: |No changes' "plan-${ENV_NAME}.txt" || echo "(no summary line - see job status)"
+          BEHIND=$(grep -c . "commits-${ENV_NAME}.txt" || true)
+          case "$EXIT_CODE" in
+            0)
+              ALERT="NOTE"
+              VERDICT="Nothing to deploy"
+              HINT="No change planned and \`terragrunt/${ENV_NAME}\` is up to date with \`main\`."
+              ;;
+            2)
+              ALERT="IMPORTANT"
+              VERDICT="Deployment pending"
+              HINT="A pull request and a tracking issue were opened. Merge the pull request to apply."
+              ;;
+            *)
+              ALERT="CAUTION"
+              VERDICT="Plan failed"
+              HINT="See the job log for the Terragrunt error."
+              ;;
+          esac
+          if [ "${DRIFT:-0}" = "1" ]; then STATE="${BEHIND} commit(s) ahead of \`terragrunt/${ENV_NAME}\`"; else STATE="up to date"; fi
+          {
+            echo "## Plan: \`${ENV_NAME}\`"
+            echo
+            echo "> [!${ALERT}]"
+            echo "> **${VERDICT}.** ${HINT}"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Environment | \`${ENV_NAME}\` |"
+            echo "| \`main\` vs \`terragrunt/${ENV_NAME}\` | ${STATE} |"
+            echo
+            echo "### Plan"
+            echo
+            echo '```'
+            grep -E 'Plan: |No changes' "plan-${ENV_NAME}.txt" || echo "(no summary line)"
+            echo '```'
+            if [ "${DRIFT:-0}" = "1" ] && [ -s "commits-${ENV_NAME}.txt" ]; then
+              echo
+              echo "### Not deployed yet"
+              echo
+              cat "commits-${ENV_NAME}.txt"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Show plan error
+        # Only the error lines: the full output stays out of the log.
+        if: steps.terragrunt.outputs.exit_code == '1'
+        env:
+          ENV_NAME: ${{ matrix.env }}
+        run: grep -iE -A3 'error' "plan-${ENV_NAME}.txt" | head -n 40 || true
+      - name: Fail on plan error
+        if: steps.terragrunt.outputs.exit_code == '1'
+        run: exit 1
+
+      - name: Store the full plan in the state bucket
+        id: store
+        if: steps.terragrunt.outputs.exit_code == '2'
+        env:
+          ENV_NAME: ${{ matrix.env }}
+          RUN_ID: ${{ github.run_id }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # OVHcloud Object Storage does not support the default checksums.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          set -euo pipefail
+          # The plan holds resource attributes: it goes to the private bucket
+          # of the state, with the credentials the plan already uses.
+          CONFIG="infra/configs/${ENV_NAME}/config.yaml"
+          BUCKET=$(yq -r '.remote_state.bucket' "$CONFIG")
+          REGION=$(yq -r '.remote_state.region' "$CONFIG")
+          ENDPOINT=$(yq -r '.remote_state.endpoint' "$CONFIG")
+          KEY="plans/terragrunt-${ENV_NAME}/${RUN_ID}/plan.txt"
+          aws s3 cp "plan-${ENV_NAME}.txt" "s3://${BUCKET}/${KEY}" \
+            --endpoint-url "$ENDPOINT" --region "$REGION" --only-show-errors
+          {
+            echo "bucket=$BUCKET"
+            echo "key=$KEY"
+            echo "region=$REGION"
+            echo "endpoint=$ENDPOINT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the deployment issue and pull request
+        if: steps.terragrunt.outputs.exit_code == '2'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          ENV_NAME: ${{ matrix.env }}
+          PLAN_BUCKET: ${{ steps.store.outputs.bucket }}
+          PLAN_KEY: ${{ steps.store.outputs.key }}
+          PLAN_REGION: ${{ steps.store.outputs.region }}
+          PLAN_ENDPOINT: ${{ steps.store.outputs.endpoint }}
+          # Who the pull request and issue are assigned to (repository
+          # variable DEPLOY_ASSIGNEE); defaults to the owner of GH_PAT.
+          ASSIGNEE: ${{ vars.DEPLOY_ASSIGNEE }}
+          # Who is asked to review the pull request (repository variable
+          # DEPLOY_REVIEWER); defaults to the assignee.
+          REVIEWER: ${{ vars.DEPLOY_REVIEWER }}
+        run: |
+          set -euo pipefail
+          ASSIGNEE=${ASSIGNEE:-@me}
+          REVIEWER=${REVIEWER:-$ASSIGNEE}
+          if [ "$REVIEWER" = "@me" ]; then REVIEWER=$(gh api user --jq .login); fi
+          BASE="terragrunt/${ENV_NAME}"
+          if ! gh api "repos/${{ github.repository }}/branches/${BASE}" >/dev/null 2>&1; then
+            echo "::error::branch ${BASE} does not exist on origin - create it once from main (see infra/README.md)"
+            exit 1
+          fi
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # The pull request head is the last commit of main that is not a
+          # release commit: those carry [skip ci], and GitHub skips the push
+          # workflows (the apply) when the head of the merge is such a commit.
+          HEAD_SHA=$(git log -1 --format=%H --invert-grep --grep='^chore(release)' HEAD)
+          HEAD_BRANCH="plan/terragrunt-${ENV_NAME}"
+          if gh api "repos/${{ github.repository }}/git/ref/heads/${HEAD_BRANCH}" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${{ github.repository }}/git/refs/heads/${HEAD_BRANCH}" \
+              -f sha="$HEAD_SHA" -F force=true --silent
+          else
+            gh api -X POST "repos/${{ github.repository }}/git/refs" \
+              -f ref="refs/heads/${HEAD_BRANCH}" -f sha="$HEAD_SHA" --silent
+          fi
+
+          # Counts only, summed over the units: no Terragrunt output in the issue.
+          # grep finds nothing when the plan is empty (only the commits are
+          # pending): that must not stop the script.
+          PLAN_SUMMARY=$({ grep -E '^Plan: ' "plan-${ENV_NAME}.txt" || true; } \
+            | awk '{a += $2; c += $5; d += $8} END {if (NR) printf "%d to add, %d to change, %d to destroy", a, c, d}')
+          PLAN_SUMMARY=${PLAN_SUMMARY:-"no resource to change"}
+
+          # What is pending: shared by the issue and the pull request.
+          SUMMARY_FILE=$(mktemp)
+          {
+            echo "A deployment of **${ENV_NAME}** infrastructure is pending."
+            echo
+            echo "- Plan: ${PLAN_SUMMARY}."
+            if [ -s "commits-${ENV_NAME}.txt" ]; then
+              echo "- Commits not deployed yet:"
+              sed 's/^/  /' "commits-${ENV_NAME}.txt"
+            fi
+          } > "$SUMMARY_FILE"
+
+          # The tracking issue comes first so that the pull request can
+          # reference it; the apply closes it (a pull request into a
+          # non-default branch cannot).
+          ISSUE_TITLE="terragrunt(${ENV_NAME}): pending deployment"
+          ISSUE=$(gh issue list --state open --json number,title \
+            | jq -r --arg t "$ISSUE_TITLE" '.[] | select(.title == $t) | .number' | head -n1)
+          if [ -z "$ISSUE" ]; then
+            ISSUE_URL=$(gh issue create --title "$ISSUE_TITLE" --body-file "$SUMMARY_FILE" --assignee "$ASSIGNEE")
+            ISSUE=${ISSUE_URL##*/}
+          else
+            gh issue edit "$ISSUE" --body-file "$SUMMARY_FILE" --add-assignee "$ASSIGNEE"
+          fi
+
+          # Pull request: tracking issue and summary only. The diff and the full
+          # plan are not posted: this repository may be public.
+          PR_FILE=$(mktemp)
+          {
+            echo "Tracking issue: #${ISSUE}"
+            echo
+            cat "$SUMMARY_FILE"
+            if [ -s "stat-${ENV_NAME}.txt" ]; then
+              echo
+              echo "Changed files:"
+              echo
+              echo '```'
+              cat "stat-${ENV_NAME}.txt"
+              echo '```'
+            fi
+            echo
+            echo "The full plan is private, in the state bucket (run ${RUN_URL}):"
+            echo
+            echo '```sh'
+            echo "aws s3 cp s3://${PLAN_BUCKET}/${PLAN_KEY} - --endpoint-url ${PLAN_ENDPOINT} --region ${PLAN_REGION}"
+            echo '```'
+          } > "$PR_FILE"
+          PR_NUMBER=$(gh pr list --base "$BASE" --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$PR_NUMBER" ]; then
+            PR_URL=$(gh pr create --base "$BASE" --head "$HEAD_BRANCH" \
+              --title "terragrunt(${ENV_NAME}): apply pending infrastructure changes" \
+              --assignee "$ASSIGNEE" --body-file "$PR_FILE")
+            PR_NUMBER=${PR_URL##*/}
+          else
+            gh pr edit "$PR_NUMBER" --body-file "$PR_FILE" --add-assignee "$ASSIGNEE"
+          fi
+          # GitHub refuses a review request addressed to the pull request's
+          # author: do not fail the run on it.
+          if ! gh pr edit "$PR_NUMBER" --add-reviewer "$REVIEWER"; then
+            echo "::warning::could not request a review from ${REVIEWER} (is it the author of the pull request?)"
+          fi
+
+      - name: Close the stale pull request and issue (plan is clean)
+        if: steps.terragrunt.outputs.exit_code == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          ENV_NAME: ${{ matrix.env }}
+        run: |
+          set -euo pipefail
+          BASE="terragrunt/${ENV_NAME}"
+          PR_NUMBER=$(gh pr list --base "$BASE" --head "plan/terragrunt-${ENV_NAME}" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr comment "$PR_NUMBER" --body "The plan is now clean (no pending changes) - closing."
+            gh pr close "$PR_NUMBER"
+          fi
+          TITLE="terragrunt(${ENV_NAME}): pending deployment"
+          ISSUE=$(gh issue list --state open --json number,title \
+            | jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .number' | head -n1)
+          if [ -n "$ISSUE" ]; then
+            gh issue close "$ISSUE" --comment "No pending changes anymore - closing."
+          fi
