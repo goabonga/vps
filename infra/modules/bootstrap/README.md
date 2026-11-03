@@ -26,6 +26,7 @@ OAuth2 service account with its IAM policies. It is run by hand with
 | Name | Type |
 | ---- | ---- |
 | [ovh_cloud_project.this](https://registry.terraform.io/providers/ovh/ovh/latest/docs/resources/cloud_project) | resource |
+| [ovh_cloud_project_storage_object_bucket_lifecycle_configuration.plans](https://registry.terraform.io/providers/ovh/ovh/latest/docs/resources/cloud_project_storage_object_bucket_lifecycle_configuration) | resource |
 | [ovh_cloud_project_user.this](https://registry.terraform.io/providers/ovh/ovh/latest/docs/resources/cloud_project_user) | resource |
 | [ovh_cloud_project_user_s3_credential.this](https://registry.terraform.io/providers/ovh/ovh/latest/docs/resources/cloud_project_user_s3_credential) | resource |
 | [ovh_cloud_project_user_s3_policy.this](https://registry.terraform.io/providers/ovh/ovh/latest/docs/resources/cloud_project_user_s3_policy) | resource |
@@ -50,6 +51,7 @@ OAuth2 service account with its IAM policies. It is run by hand with
 | <a name="input_iam_policies"></a> [iam\_policies](#input\_iam\_policies) | IAM policies granted to the OAuth2 client, by name: the URNs of the<br/>resources and the actions allowed on them (e.g. vps:apiovh:*). Ignored<br/>when oauth2\_client is null. | <pre>map(object({<br/>    resources = list(string)<br/>    allow     = list(string)<br/>  }))</pre> | `{}` | no |
 | <a name="input_oauth2_client"></a> [oauth2\_client](#input\_oauth2\_client) | Creates an OAuth2 service account (client credentials flow) for the<br/>day-to-day Terragrunt runs, so they do not need the bootstrap<br/>credentials. Null creates none. It has no right until iam\_policies<br/>grants some. | <pre>object({<br/>    name        = string<br/>    description = optional(string, "Terragrunt runs of ovh-tf")<br/>  })</pre> | `null` | no |
 | <a name="input_order_project"></a> [order\_project](#input\_order\_project) | Orders a new Public Cloud project instead of using an existing one.<br/>Needs a default payment method on the OVHcloud account. `ovh_subsidiary`<br/>defaults to the one of the account. | <pre>object({<br/>    description    = string<br/>    ovh_subsidiary = optional(string)<br/>    plan_code      = optional(string, "project.2018")<br/>  })</pre> | `null` | no |
+| <a name="input_plans_retention_days"></a> [plans\_retention\_days](#input\_plans\_retention\_days) | Days after which the plans stored under plans/ in the bucket are deleted<br/>(the terragrunt-plan workflow writes them there). Their previous versions<br/>go one day later. The states are never concerned. null keeps the plans<br/>forever. | `number` | `7` | no |
 | <a name="input_project_id"></a> [project\_id](#input\_project\_id) | Id of an existing Public Cloud project. Exactly one of project\_id and order\_project must be set. | `string` | `null` | no |
 | <a name="input_user_description"></a> [user\_description](#input\_user\_description) | Description of the user that accesses the bucket. | `string` | `"terraform state"` | no |
 
