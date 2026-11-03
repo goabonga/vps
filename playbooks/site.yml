@@ -4,3 +4,4 @@
   gather_facts: false
   roles:
     - goabonga.vps.version
+    - goabonga.vps.sysctl
