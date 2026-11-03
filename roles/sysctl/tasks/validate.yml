@@ -13,3 +13,49 @@
       The sysctl role only supports Ubuntu, found
       {{ ansible_facts['distribution'] }}.
     quiet: true
+
+# Everything is checked before the host is touched.
+- name: Check that the parameters are a mapping
+  ansible.builtin.assert:
+    that:
+      - sysctl_parameters is mapping
+    fail_msg: sysctl_parameters must be a mapping from a parameter name to its value.
+    quiet: true
+
+- name: Check the parameter names
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item is match('^[a-z][a-z0-9_]*([.][A-Za-z0-9_-]+)+\\Z')
+    fail_msg: >-
+      Invalid sysctl parameter name {{ item | to_json }}: expected dotted
+      segments such as vm.swappiness (lowercase first segment, then letters,
+      digits, '_' or '-').
+    quiet: true
+  loop: "{{ sysctl_parameters | list }}"
+
+- name: Check the type of the parameter values
+  ansible.builtin.assert:
+    that:
+      - item.value is not boolean
+      - item.value is integer or item.value is string
+    fail_msg: >-
+      The value of {{ item.key }} must be an integer or a string, found
+      {{ item.value | to_json }} (write 0 or 1 instead of a boolean).
+    quiet: true
+  loop: "{{ sysctl_parameters | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Check the content of the parameter values
+  ansible.builtin.assert:
+    that:
+      - (item.value | string) == (item.value | string | trim)
+      - (item.value | string) is match('^[^\\x00-\\x1f\\x7f]+\\Z')
+    fail_msg: >-
+      The value of {{ item.key }} must be a single line without leading or
+      trailing space, found {{ item.value | to_json }}.
+    quiet: true
+  loop: "{{ sysctl_parameters | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
