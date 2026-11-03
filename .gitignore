@@ -13,3 +13,4 @@ generated_*.tf
 *.tfstate
 *.tfstate.*
 infra/.env
+infra/modules/**/.terraform.lock.hcl
