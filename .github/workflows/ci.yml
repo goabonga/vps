@@ -161,3 +161,44 @@ jobs:
         env:
           JOB_STATUS: ${{ job.status }}
         run: scripts/summary.sh "multicz" "$JOB_STATUS" --file multicz.txt
+
+  infra-fmt:
+    name: infra-fmt
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.13.2
+          tofu_wrapper: false
+      - uses: ./.github/actions/setup-terragrunt # zizmor: ignore[self-repository]
+      - name: Check the formatting
+        shell: bash
+        run: make -C infra fmt-check 2>&1 | tee infra-fmt.txt
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: scripts/summary.sh "infra formatting (tofu fmt, terragrunt hcl format)" "$JOB_STATUS" --file infra-fmt.txt
+
+  infra-test:
+    name: infra-test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.13.2
+          tofu_wrapper: false
+      - name: Test the modules
+        shell: bash
+        run: make -C infra test 2>&1 | tee infra-test.txt
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: scripts/summary.sh "infra tests (tofu test)" "$JOB_STATUS" --file infra-test.txt --tail 60
