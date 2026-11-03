@@ -1,0 +1,31 @@
+# Settings of terraform-docs (`make docs`): the generated part of the README of
+# each module sits between the BEGIN_TF_DOCS and END_TF_DOCS markers.
+formatter: markdown table
+
+output:
+  file: README.md
+  mode: inject
+  template: |-
+    <!-- BEGIN_TF_DOCS -->
+    {{ .Content }}
+    <!-- END_TF_DOCS -->
+
+content: |-
+  {{ .Requirements }}
+
+  {{ .Providers }}
+
+  {{ .Resources }}
+
+  {{ .Inputs }}
+
+  {{ .Outputs }}
+
+sort:
+  enabled: true
+  by: name
+
+settings:
+  # The provider versions are the constraints of versions.tf, not the ones a
+  # local `tofu init` happened to lock, so the result is the same everywhere.
+  lockfile: false
