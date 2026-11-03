@@ -7,7 +7,7 @@
 - name: Look for the parameters in the running kernel
   ansible.builtin.stat:
     path: "/proc/sys/{{ item.key | replace('.', '/') }}"
-  loop: "{{ sysctl_parameters | dict2items | sort(attribute='key') }}"
+  loop: "{{ sysctl_requested | dict2items | sort(attribute='key') }}"
   loop_control:
     label: "{{ item.key }}"
   register: sysctl_support
@@ -38,4 +38,4 @@
 
 - name: Keep the parameters to manage
   ansible.builtin.set_fact:
-    sysctl_effective: "{{ sysctl_parameters | dict2items | rejectattr('key', 'in', sysctl_unsupported) | items2dict }}"
+    sysctl_effective: "{{ sysctl_requested | dict2items | rejectattr('key', 'in', sysctl_unsupported) | items2dict }}"

@@ -20,6 +20,7 @@ argument_specs:
           - Kernel parameters to manage, as a mapping from the parameter name
             to its value.
           - An empty mapping leaves the host untouched.
+          - These parameters win over the ones of the profiles.
       sysctl_persistent:
         type: bool
         default: true
@@ -64,3 +65,35 @@ argument_specs:
           - The check only tells that the parameter exists in the running
             kernel, not that the kernel accepts the value. A parameter that a
             kernel module provides is reported while the module is not loaded.
+      sysctl_profiles:
+        type: list
+        elements: str
+        choices:
+          - security
+        default: []
+        description:
+          - Named sets of parameters to manage in addition to
+            C(sysctl_parameters). The profiles are applied in the given order,
+            then C(sysctl_parameters) wins over all of them.
+          - C(security) is a conservative baseline for a generic Ubuntu VPS.
+            Most of its values are the Ubuntu defaults, kept to detect a
+            drift. It changes the ICMP redirects (accepting and sending them,
+            IPv4 and IPv6), which only matters to a host that routes for
+            others.
+          - Stricter values are not part of the profile. Set them in
+            C(sysctl_parameters) when they suit the host. In
+            C(kernel.kptr_restrict) 2 hides the pointers even from root
+            (it gets in the way of perf). In C(kernel.yama.ptrace_scope) 2
+            lets only root attach a debugger. In
+            C(kernel.unprivileged_bpf_disabled) 1 cannot be undone before a
+            reboot. In C(net.core.bpf_jit_harden) 2 costs a little CPU in the
+            BPF JIT. In C(kernel.kexec_load_disabled) 1 forbids kexec and
+            kdump until a reboot. In C(kernel.io_uring_disabled) 2 breaks the
+            programs that use io_uring. In C(fs.protected_fifos) 2 can
+            surprise some scripts. In C(fs.suid_dumpable) 0 removes the core
+            dumps of setuid programs. In C(net.ipv4.tcp_rfc1337) 1 and
+            C(net.ipv4.conf.all.secure_redirects) 0 there is no known cost.
+            In C(net.ipv4.conf.all.rp_filter) and
+            C(net.ipv4.conf.default.rp_filter) 1 breaks asymmetric routing,
+            VPNs and Kubernetes. In C(net.ipv4.conf.all.log_martians) 1 makes
+            the logs noisier.

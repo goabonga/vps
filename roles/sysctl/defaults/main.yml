@@ -6,6 +6,11 @@ sysctl_enabled: true
 #   vm.swappiness: 10
 sysctl_parameters: {}
 
+# Named sets of parameters to manage in addition, for example:
+#   - security
+# The explicit sysctl_parameters win over the profiles.
+sysctl_profiles: []
+
 # Write the parameters to sysctl_config_file, so that they survive a reboot.
 sysctl_persistent: true
 

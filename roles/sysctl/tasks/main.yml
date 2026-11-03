@@ -5,6 +5,9 @@
     - name: Check the host and the variables
       ansible.builtin.include_tasks: validate.yml
 
+    - name: Resolve the parameters of the profiles
+      ansible.builtin.include_tasks: resolve.yml
+
     - name: Look for the parameters in the running kernel
       ansible.builtin.include_tasks: support.yml
 

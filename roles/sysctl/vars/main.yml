@@ -4,3 +4,42 @@
 # Where the module records the values it applies when sysctl_persistent is
 # false. It lives in /run, so nothing survives a reboot.
 sysctl_runtime_file: /run/goabonga-vps-sysctl.conf
+
+# The profiles that can be selected with sysctl_profiles. A profile is a
+# mapping from a parameter name to a value, with the same rules as
+# sysctl_parameters. To add a profile, add an entry here and its name to the
+# choices of sysctl_profiles in meta/argument_specs.yml.
+sysctl_profile_parameters:
+  # A conservative security baseline for a generic Ubuntu VPS. Most of these
+  # values are already the Ubuntu defaults: setting them detects a later drift.
+  # Only the ICMP redirects change, and nothing here needs a reboot or breaks
+  # a host that is not a router.
+  security:
+    # Kernel.
+    kernel.randomize_va_space: 2
+    kernel.dmesg_restrict: 1
+    kernel.kptr_restrict: 1
+    kernel.yama.ptrace_scope: 1
+    kernel.unprivileged_bpf_disabled: 2
+    dev.tty.ldisc_autoload: 0
+    dev.tty.legacy_tiocsti: 0
+    vm.unprivileged_userfaultfd: 0
+    # Files.
+    fs.protected_hardlinks: 1
+    fs.protected_symlinks: 1
+    fs.protected_fifos: 1
+    fs.protected_regular: 2
+    # Network: no source routing, no ICMP redirects accepted or sent (a host
+    # that routes for others can set these back with sysctl_parameters).
+    net.ipv4.tcp_syncookies: 1
+    net.ipv4.icmp_echo_ignore_broadcasts: 1
+    net.ipv4.icmp_ignore_bogus_error_responses: 1
+    net.ipv4.conf.all.accept_source_route: 0
+    net.ipv4.conf.default.accept_source_route: 0
+    net.ipv6.conf.all.accept_source_route: 0
+    net.ipv4.conf.all.accept_redirects: 0
+    net.ipv4.conf.default.accept_redirects: 0
+    net.ipv6.conf.all.accept_redirects: 0
+    net.ipv6.conf.default.accept_redirects: 0
+    net.ipv4.conf.all.send_redirects: 0
+    net.ipv4.conf.default.send_redirects: 0

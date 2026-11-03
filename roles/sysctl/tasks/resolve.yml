@@ -1,0 +1,15 @@
+---
+# The parameters to manage: the ones of each profile in the given order, then
+# the explicit ones, which win. The result does not depend on anything else.
+- name: Start from no parameter
+  ansible.builtin.set_fact:
+    sysctl_requested: {}
+
+- name: Add the parameters of each profile
+  ansible.builtin.set_fact:
+    sysctl_requested: "{{ sysctl_requested | combine(sysctl_profile_parameters[item]) }}"
+  loop: "{{ sysctl_profiles }}"
+
+- name: Add the explicit parameters
+  ansible.builtin.set_fact:
+    sysctl_requested: "{{ sysctl_requested | combine(sysctl_parameters) }}"
