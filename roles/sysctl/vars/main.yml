@@ -59,3 +59,11 @@ sysctl_profile_parameters:
     vm.vfs_cache_pressure: 50
     vm.dirty_background_ratio: 5
     vm.dirty_ratio: 15
+
+  # More file watchers for the tools that follow many files (editors, build
+  # tools, containers). Each watch costs a little kernel memory, only when it
+  # is used. fs.file-max is left alone on purpose: on Ubuntu it is already
+  # practically unlimited, and a smaller value would lower it.
+  filesystem:
+    fs.inotify.max_user_watches: 262144
+    fs.inotify.max_user_instances: 512

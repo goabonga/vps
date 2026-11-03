@@ -72,6 +72,7 @@ argument_specs:
           - security
           - network
           - memory
+          - filesystem
         default: []
         description:
           - Named sets of parameters to manage in addition to
@@ -91,6 +92,11 @@ argument_specs:
             (C(vm.vfs_cache_pressure) 50) and flushes dirty pages earlier and
             in smaller batches (C(vm.dirty_background_ratio) 5 and
             C(vm.dirty_ratio) 15). It leaves C(vm.overcommit_memory) alone.
+          - C(filesystem) raises the inotify limits
+            (C(fs.inotify.max_user_watches) 262144 and
+            C(fs.inotify.max_user_instances) 512) for the tools that follow
+            many files. It leaves C(fs.file-max) alone, which Ubuntu already
+            sets practically unlimited.
           - Stricter values are not part of the profile. Set them in
             C(sysctl_parameters) when they suit the host. In
             C(kernel.kptr_restrict) 2 hides the pointers even from root
