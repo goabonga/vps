@@ -5,15 +5,35 @@
 # goabonga.vps Ansible collection. Driven by Conventional Commits.
 # Docs: https://goabonga.github.io/multicz/
 #
-# The `collection` component is the reusable content (roles, playbooks,
-# plugins, galaxy.yml): a library, released on every push to `main` that
-# touches its paths.
+# Two kinds of components:
+#
+# - `collection`: the reusable content (roles, playbooks, plugins,
+#   galaxy.yml). A library - released on every push to `main` that touches
+#   its paths (every component whose name does NOT start with `ansible-`).
+# - `ansible-<env>`: what is actually applied on an environment
+#   (inventories/<env>/). Deployed state, not a library - excluded from that
+#   automatic release and bumped only after a successful apply. `depends_on`
+#   lists what the deploy ships, so the `upstream-notes` plugin pulls those
+#   commits into its changelog.
+#
+# The version of a deployment is the `deployment_version` variable of
+# inventories/<env>/group_vars/all/ansible.yml: the pipelines compute the next
+# one before the apply, pass it to Ansible with `-e deployment_version=...` and
+# multicz writes the same value back after a successful apply. The changelog
+# of what a deployment shipped lives next to it, in inventories/<env>/.
+#
+# Adding an environment: create inventories/<env>/ (hosts.yml and
+# group_vars/all/{main,ansible}.yml), copy the ansible-production component
+# below and create a `ansible/<env>` branch from `main`.
 
 [project]
 commit_convention = "conventional"
 tag_format = "{component}-v{version}"
 initial_version = "0.0.0"
 state_file = ".multicz/state.json"
+# Opt in to the post_bump hooks (reviewable here): the deploy changelog is
+# cleaned by scripts/format-changelog.sh before the release commit is made.
+post_bump_policy = "allow"
 # `[skip ci]` makes GitHub skip the workflows triggered by the release
 # commit push: a release must not trigger a run.
 release_commit_message = "chore(release): bump {summary}\n\n{body}\n\n[skip ci]"
@@ -46,6 +66,12 @@ types = ["fix"]
 title = "Performance"
 types = ["perf"]
 
+# Surfaces upstream (depends_on) commits in a deploy's changelog and
+# release notes, i.e. what the collection changes it actually shipped.
+[plugins.upstream-notes]
+max_commits = 30
+include_prereleases = false
+
 # --- collection: roles, playbooks, plugins - the reusable content -------
 [components.collection]
 paths = [
@@ -59,3 +85,27 @@ bump_files = [
     { file = "galaxy.yml", key = "version" },
 ]
 changelog = "CHANGELOG.md"
+# The collection used by a deployment is pinned to a release tag in
+# inventories/<env>/requirements.yml: each release of the collection rewrites
+# the tag, so the deployment of that environment picks up exactly the
+# released version. Remove the mirror of an environment to pin it by hand
+# (staging may follow, production may wait).
+mirrors = [
+    { file = "inventories/production/requirements.yml", key = "regex:version:\\s*collection-v(\\S+)" },
+]
+
+# --- ansible-production: deployed state, not a library -------------------
+# Bumped only after a successful apply, never by the generic release.
+[components.ansible-production]
+paths = ["inventories/production/**"]
+# Written by multicz itself: not part of what a deployment ships.
+exclude_paths = [
+    "inventories/production/CHANGELOG.md",
+    "inventories/production/group_vars/all/ansible.yml",
+]
+bump_files = [
+    { file = "inventories/production/group_vars/all/ansible.yml", key = "deployment_version" },
+]
+changelog = "inventories/production/CHANGELOG.md"
+post_bump = ["scripts/format-changelog.sh inventories/production/CHANGELOG.md"]
+depends_on = ["collection"]
