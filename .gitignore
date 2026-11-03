@@ -5,3 +5,11 @@ __pycache__/
 .vault_pass
 collections/
 .dev/
+
+# infra: Terraform and Terragrunt artifacts, local credentials
+.terraform/
+.terragrunt-cache/
+generated_*.tf
+*.tfstate
+*.tfstate.*
+infra/.env
