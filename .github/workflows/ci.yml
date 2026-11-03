@@ -1,0 +1,163 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - run: uv sync --frozen
+      - name: ansible-lint
+        shell: bash
+        run: uv run --no-sync ansible-lint 2>&1 | tee ansible-lint.txt
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: scripts/summary.sh "ansible-lint" "$JOB_STATUS" --file ansible-lint.txt
+
+  syntax:
+    name: syntax
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - run: uv sync --frozen
+      - name: Install the collection of the working tree
+        run: scripts/install-collection.sh local
+      - name: ansible-playbook --syntax-check
+        shell: bash
+        env:
+          # The inventory reads VPS_HOST; any value is fine for a syntax check.
+          VPS_HOST: 127.0.0.1
+        run: |
+          for playbook in playbooks/*.yml; do
+            echo "== ${playbook}"
+            uv run --no-sync ansible-playbook -i inventories/production "$playbook" --syntax-check
+          done 2>&1 | tee syntax.txt
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: scripts/summary.sh "playbook syntax" "$JOB_STATUS" --file syntax.txt
+
+  collection:
+    name: collection
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - run: uv sync --frozen
+      - name: Build and install the collection
+        shell: bash
+        run: |
+          uv run --no-sync ansible-galaxy collection build --output-path dist
+          uv run --no-sync ansible-galaxy collection install dist/*.tar.gz -p "$RUNNER_TEMP/collections"
+          echo "Content of the tarball:"
+          tar tzf dist/*.tar.gz
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          ls dist/ > collection.txt 2>/dev/null || true
+          tar tzf dist/*.tar.gz >> collection.txt 2>/dev/null || true
+          scripts/summary.sh "collection build" "$JOB_STATUS" --file collection.txt --tail 40
+
+  workflows:
+    name: workflows
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - name: actionlint
+        shell: bash
+        run: uvx --from actionlint-py actionlint 2>&1 | tee workflows.txt
+      - name: zizmor
+        shell: bash
+        run: uvx zizmor --no-progress --offline .github/workflows 2>&1 | tee -a workflows.txt
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: scripts/summary.sh "workflows (actionlint, zizmor)" "$JOB_STATUS" --file workflows.txt
+
+  audit:
+    name: audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - name: pip-audit
+        shell: bash
+        run: |
+          uv export --frozen --no-emit-project --no-hashes -o requirements.txt
+          uvx pip-audit -r requirements.txt --no-deps --disable-pip 2>&1 | tee audit.txt
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: scripts/summary.sh "dependency audit (pip-audit)" "$JOB_STATUS" --file audit.txt
+
+  multicz:
+    name: multicz
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # NOTE: no python-version pin - multicz needs Python >=3.12.
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - name: Validate multicz config
+        shell: bash
+        run: uv tool run multicz validate --strict 2>&1 | tee multicz.txt
+      - name: Release plan
+        run: uv tool run multicz plan --summary "$GITHUB_STEP_SUMMARY"
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: scripts/summary.sh "multicz" "$JOB_STATUS" --file multicz.txt
