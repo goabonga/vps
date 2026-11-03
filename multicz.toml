@@ -22,6 +22,12 @@
 # multicz writes the same value back after a successful apply. The changelog
 # of what a deployment shipped lives next to it, in inventories/<env>/.
 #
+# The `infra/` directory (Terragrunt and Terraform) follows the same split:
+# `infra` (the Terragrunt wiring and the state storage unit) and one
+# `module-<name>` per Terraform module are libraries released on every push
+# to `main`; `terragrunt-<env>` (infra/configs/<env>/) is the state applied on
+# an environment, bumped only after a successful terragrunt apply.
+#
 # Adding an environment: create inventories/<env>/ (hosts.yml and
 # group_vars/all/{main,ansible}.yml), copy the ansible-production component
 # below and create a `ansible/<env>` branch from `main`.
@@ -109,3 +115,47 @@ bump_files = [
 changelog = "inventories/production/CHANGELOG.md"
 post_bump = ["scripts/format-changelog.sh inventories/production/CHANGELOG.md"]
 depends_on = ["collection"]
+
+# --- infra: the Terragrunt wiring and the state storage unit -------------
+[components.infra]
+paths = [
+    "infra/ovh/**",
+    "infra/bootstrap/**",
+    "infra/scripts/**",
+    "infra/Makefile",
+    "infra/README.md",
+    "infra/CHANGELOG.md",
+]
+bump_files = [
+    { file = "infra/README.md", key = "regex:\\| version (\\S+)" },
+]
+changelog = "infra/CHANGELOG.md"
+
+# --- module-*: the Terraform modules, libraries like the collection ------
+[components.module-vps]
+paths = ["infra/modules/vps/**"]
+bump_files = [
+    { file = "infra/modules/vps/README.md", key = "regex:\\| version (\\S+)" },
+]
+changelog = "infra/modules/vps/CHANGELOG.md"
+
+[components.module-bootstrap]
+paths = ["infra/modules/bootstrap/**"]
+bump_files = [
+    { file = "infra/modules/bootstrap/README.md", key = "regex:\\| version (\\S+)" },
+]
+changelog = "infra/modules/bootstrap/CHANGELOG.md"
+
+# --- terragrunt-production: applied state, not a library ----------------
+# Bumped only after a successful terragrunt apply, never by the generic
+# release. The bootstrap is run by hand and is not part of what it ships.
+[components.terragrunt-production]
+paths = ["infra/configs/production/**"]
+# Written by multicz itself: not part of what a deployment ships.
+exclude_paths = ["infra/configs/production/CHANGELOG.md"]
+bump_files = [
+    { file = "infra/configs/production/config.yaml", key = "version" },
+]
+changelog = "infra/configs/production/CHANGELOG.md"
+post_bump = ["scripts/format-changelog.sh infra/configs/production/CHANGELOG.md"]
+depends_on = ["infra", "module-vps"]
