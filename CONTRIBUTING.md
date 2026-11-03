@@ -64,6 +64,25 @@ scripts/dev-vm.sh up
 uv run ansible-playbook -i inventories/development goabonga.vps.site
 ```
 
+## Adding a role
+
+A role is its own scope, named after it (`feat(version): ...`). Each step is a
+commit of its own, in this order:
+
+1. `feat(<role>): add role <what it does>`: `roles/<role>/` only, with a
+   default in `defaults/main.yml` for every variable the role owns. The
+   commit also adds the scope to the "Roles" list of "Commit scopes".
+2. `feat(<role>): apply role in the site playbook`.
+3. `docs(<role>): document the role`, in the README.
+4. `feat(development): configure the <role> role`: the values in
+   `inventories/development/group_vars/all/<role>.yml`. Try the role on the
+   development VM (see "Checking a change") before going further.
+5. `feat(production): configure the <role> role`: the same in
+   `inventories/production/group_vars/all/<role>.yml`.
+
+An environment file is only added when the defaults of the role do not fit.
+Versions, changelogs and the pinned collection are never edited by hand.
+
 ## Releases and deployments
 
 Versions, tags, changelogs and releases are produced by the pipelines with
