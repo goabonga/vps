@@ -35,3 +35,13 @@ argument_specs:
             by name.
           - It must be a C(.conf) file directly inside C(/etc/sysctl.d). The
             role never touches C(/etc/sysctl.conf) nor any other file.
+      sysctl_apply:
+        type: bool
+        default: true
+        description:
+          - Apply the parameters to the running kernel, only the ones that
+            differ from their desired value.
+          - Together with C(sysctl_persistent) it gives four modes. Both true
+            applies and persists. Only C(sysctl_apply) applies without
+            persisting. Only C(sysctl_persistent) persists for the next boot.
+            Both false only validates the configuration.

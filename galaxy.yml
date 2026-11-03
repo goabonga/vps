@@ -13,6 +13,8 @@ tags:
   - infrastructure
   - ovh
   - vps
+dependencies:
+  ansible.posix: ">=2.0.0"
 build_ignore:
   - .ansible
   - .dev

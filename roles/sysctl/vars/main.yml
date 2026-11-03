@@ -1,0 +1,6 @@
+---
+# Internal: not meant to be overridden.
+
+# Where the module records the values it applies when sysctl_persistent is
+# false. It lives in /run, so nothing survives a reboot.
+sysctl_runtime_file: /run/goabonga-vps-sysctl.conf

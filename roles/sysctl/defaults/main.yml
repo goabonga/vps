@@ -12,3 +12,7 @@ sysctl_persistent: true
 # The only file the role manages. It must be a .conf file of /etc/sysctl.d:
 # the role never touches /etc/sysctl.conf nor any other file.
 sysctl_config_file: /etc/sysctl.d/90-goabonga-vps.conf
+
+# Apply the parameters to the running kernel, one by one, without reloading the
+# other kernel settings.
+sysctl_apply: true
