@@ -1,0 +1,8 @@
+---
+# Kernel parameters of the development VM: every profile of the sysctl role,
+# to try them before they are considered for another environment.
+sysctl_profiles:
+  - security
+  - network
+  - memory
+  - filesystem
