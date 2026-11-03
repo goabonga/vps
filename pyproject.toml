@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+[project]
+name = "vps"
+version = "0.0.0"
+description = "Ansible automation for OVH infrastructure."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Chris", email = "goabonga@pm.me" }]
+dependencies = [
+    "ansible-core>=2.18",
+]
+
+[dependency-groups]
+dev = [
+    "ansible-lint>=25",
+]
+
+[tool.uv]
+package = false
