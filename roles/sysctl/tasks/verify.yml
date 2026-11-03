@@ -1,0 +1,37 @@
+---
+# Reads the parameters back from the running kernel and compares them with the
+# desired values (spaces and tabs between words do not matter).
+- name: Read the running values
+  ansible.builtin.command:
+    cmd: "sysctl -n {{ item.key }}"
+  loop: "{{ sysctl_parameters | dict2items | sort(attribute='key') }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: sysctl_read
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Start from no difference
+  ansible.builtin.set_fact:
+    sysctl_drift: []
+
+- name: Collect the differences
+  ansible.builtin.set_fact:
+    sysctl_drift: >-
+      {{ sysctl_drift + [item.item.key ~ ': ' ~ (
+      'cannot be read (' ~ (item.stderr | trim) ~ ')' if item.rc != 0
+      else 'running ' ~ (item.stdout | split | join(' ')) ~ ', wanted ' ~ (item.item.value | string | split | join(' ')))] }}
+  loop: "{{ sysctl_read.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  when: >-
+    item.rc != 0 or
+    (item.stdout | split | join(' ')) != (item.item.value | string | split | join(' '))
+
+- name: Check that the running kernel has the desired values
+  ansible.builtin.assert:
+    that:
+      - sysctl_drift | length == 0
+    fail_msg: "The running kernel differs from the desired parameters:\n{{ sysctl_drift | join('\n') }}"
+    quiet: true

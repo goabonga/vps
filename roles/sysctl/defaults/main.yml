@@ -16,3 +16,7 @@ sysctl_config_file: /etc/sysctl.d/90-goabonga-vps.conf
 # Apply the parameters to the running kernel, one by one, without reloading the
 # other kernel settings.
 sysctl_apply: true
+
+# Read the parameters back from the running kernel and fail when one differs
+# from its desired value.
+sysctl_verify: true

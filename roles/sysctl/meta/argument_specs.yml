@@ -45,3 +45,11 @@ argument_specs:
             applies and persists. Only C(sysctl_apply) applies without
             persisting. Only C(sysctl_persistent) persists for the next boot.
             Both false only validates the configuration.
+      sysctl_verify:
+        type: bool
+        default: true
+        description:
+          - Read every parameter back from the running kernel and fail with the
+            list of the ones that differ from their desired value.
+          - Without C(sysctl_apply) it reports the drift of the running kernel
+            without changing it.
