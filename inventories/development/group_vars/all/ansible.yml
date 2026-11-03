@@ -1,0 +1,4 @@
+---
+# Nothing is released from this environment: the roles are tried here with
+# the collection of the working tree before they are released.
+deployment_version: "development"
