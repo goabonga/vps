@@ -58,6 +58,15 @@
             "context": "audit"
           },
           {
+            "context": "infra-fmt"
+          },
+          {
+            "context": "infra-test"
+          },
+          {
+            "context": "infra-docs"
+          },
+          {
             "context": "multicz"
           },
           {

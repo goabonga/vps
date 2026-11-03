@@ -196,7 +196,7 @@ only deploy the inventories that have this file.
 
 Only signed commits should reach `main`. The rulesets in
 `.github/rulesets/` protect `main` (pull request, the `lint`, `syntax`, `collection`,
-`workflows`, `audit`, `multicz` and `signatures` checks, signed commits, no
+`workflows`, `audit`, `infra-fmt`, `infra-test`, `infra-docs`, `multicz` and `signatures` checks, signed commits, no
 force push or deletion) and the
 `ansible/*` branches (pull request, signed commits, no force push or
 deletion). Repository admins bypass them, so the pipelines can push
