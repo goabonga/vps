@@ -1,27 +1,12 @@
 {
   "version": 1,
-  "git_head": "672643dbb1906f18b292200d2f3d53548726810d",
-  "git_head_short": "672643d",
-  "timestamp": "2026-11-03T23:19:03Z",
+  "git_head": "46a86ec0bc2c56d32a589cd1ed68b911988cff57",
+  "git_head_short": "46a86ec",
+  "timestamp": "2026-11-03T23:30:47Z",
   "components": {
-    "collection": {
+    "terragrunt-production": {
       "version": "0.1.0",
-      "tag": "collection-v0.1.0",
-      "tag_sha": null
-    },
-    "infra": {
-      "version": "0.1.0",
-      "tag": "infra-v0.1.0",
-      "tag_sha": null
-    },
-    "module-vps": {
-      "version": "0.1.0",
-      "tag": "module-vps-v0.1.0",
-      "tag_sha": null
-    },
-    "module-bootstrap": {
-      "version": "0.1.0",
-      "tag": "module-bootstrap-v0.1.0",
+      "tag": "terragrunt-production-v0.1.0",
       "tag_sha": null
     }
   }

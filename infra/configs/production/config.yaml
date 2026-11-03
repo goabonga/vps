@@ -1,6 +1,6 @@
 # Version of what is applied on this environment, written by the release
 # of the terragrunt-production component after each successful apply.
-version: 0.0.0
+version: 0.1.0
 ovh:
   # endpoint - OVHcloud API (ovh-eu, ovh-ca, ovh-us). Credentials are read
   # from OVH_APPLICATION_KEY / OVH_APPLICATION_SECRET / OVH_CONSUMER_KEY,
@@ -21,7 +21,7 @@ bootstrap:
   # order_project - orders a new project (needs a default payment method):
   #   description: ovh-tf
   #   ovh_subsidiary: FR        # optional, defaults to the account's
-  order_project: ~
+  order_project:
   user_description: ovh-tf
   bucket_versioning: true
   # plans_retention_days - the plans stored under plans/ in the bucket by the
@@ -50,7 +50,7 @@ vps:
   # --- manageable ---
   display_name: vps-d968375f.vps.ovh.net
   # keymap - KVM keyboard layout (fr, us...). Not read back on import.
-  keymap: ~
+  keymap:
   # netboot_mode - local or rescue.
   netboot_mode: local
   sla_monitoring: false
@@ -78,12 +78,12 @@ vps:
 
   # --- order / reinstall (ignored once the VPS exists, except image_id:
   # setting or changing it REINSTALLS the VPS) ---
-  image_id: ~
-  ovh_subsidiary: ~
-  public_ssh_key: ~
-  do_not_send_password: ~
-  plan: ~
-  plan_option: ~
+  image_id:
+  ovh_subsidiary:
+  public_ssh_key:
+  do_not_send_password:
+  plan:
+  plan_option:
 
   # --- reverse DNS ---
   # Key = IP address of the VPS (`ips` output), `reverse` = wanted hostname.
