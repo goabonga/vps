@@ -70,6 +70,7 @@ argument_specs:
         elements: str
         choices:
           - security
+          - network
         default: []
         description:
           - Named sets of parameters to manage in addition to
@@ -80,6 +81,10 @@ argument_specs:
             drift. It changes the ICMP redirects (accepting and sending them,
             IPv4 and IPv6), which only matters to a host that routes for
             others.
+          - C(network) raises the queues of pending connections
+            (C(net.core.somaxconn), C(net.ipv4.tcp_max_syn_backlog) and
+            C(net.core.netdev_max_backlog)) for a host that serves many
+            clients. They are only ceilings, and nothing is allocated before use.
           - Stricter values are not part of the profile. Set them in
             C(sysctl_parameters) when they suit the host. In
             C(kernel.kptr_restrict) 2 hides the pointers even from root
