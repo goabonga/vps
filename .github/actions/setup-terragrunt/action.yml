@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+# Installs a pinned Terragrunt release, checked against the SHA-256 published
+# in the SHA256SUMS file of that release. Used instead of a third-party action,
+# which would be one more dependency to pin (and one that still runs on Node 20).
+# To upgrade: change the version and the checksum of terragrunt_linux_amd64 in
+# https://github.com/gruntwork-io/terragrunt/releases.
+
+name: setup-terragrunt
+description: Installs a pinned Terragrunt release after checking its checksum.
+
+runs:
+  using: composite
+  steps:
+    - name: Install terragrunt
+      shell: bash
+      env:
+        VERSION: 1.2.1
+        SHA256: f2f6238ad2348855a4e876b90fd31f3f5d106bb234794202a00b2bcc139fa753
+      run: |
+        set -euo pipefail
+        curl -sSfL -o terragrunt \
+          "https://github.com/gruntwork-io/terragrunt/releases/download/v${VERSION}/terragrunt_linux_amd64"
+        echo "${SHA256}  terragrunt" | sha256sum -c -
+        sudo install -m 755 terragrunt /usr/local/bin/terragrunt
+        rm -f terragrunt
+        terragrunt --version
