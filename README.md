@@ -107,8 +107,8 @@ installed wins.
 Components are versioned by [multicz](https://goabonga.github.io/multicz/)
 from Conventional Commits (see `multicz.toml`):
 
-- `collection` (roles, playbooks, plugins, `galaxy.yml`) is tagged
-  `collection-v<version>`;
+- `collection` (roles, playbooks, plugins, `galaxy.yml`) is released on
+  every push to `main`, tagged `collection-v<version>`;
 - `ansible-<env>` tracks what is deployed on an environment
   (`inventories/<env>/`). Its version is the `deployment_version` variable of
   `inventories/<env>/group_vars/all/ansible.yml`; multicz records it, with the

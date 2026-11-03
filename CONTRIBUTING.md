@@ -61,6 +61,13 @@ scripts/dev-vm.sh up
 uv run ansible-playbook -i inventories/development goabonga.vps.site
 ```
 
+## Releases and deployments
+
+Versions, tags, changelogs and releases are produced by the pipelines with
+[multicz](https://goabonga.github.io/multicz/) from the commit messages: do
+not bump a version or edit a changelog by hand. See "Releases and
+deployment" in the [README](README.md).
+
 ## Reporting bugs and asking for features
 
 Please open a GitHub issue. For anything security-sensitive, follow
