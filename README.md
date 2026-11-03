@@ -77,3 +77,24 @@ scripts/install-collection.sh local
 export VPS_HOST=<vps-ip>
 uv run ansible-playbook -i inventories/production goabonga.vps.site
 ```
+
+## Releases and deployment
+
+Components are versioned by [multicz](https://goabonga.github.io/multicz/)
+from Conventional Commits (see `multicz.toml`):
+
+- `collection` (roles, playbooks, plugins, `galaxy.yml`) is tagged
+  `collection-v<version>`;
+- `ansible-<env>` tracks what is deployed on an environment
+  (`inventories/<env>/`). Its version is the `deployment_version` variable of
+  `inventories/<env>/group_vars/all/ansible.yml`; multicz records it, with the
+  changelog of what was shipped in `inventories/<env>/CHANGELOG.md` (cleaned
+  by `scripts/format-changelog.sh`, a multicz `post_bump` hook).
+
+Each environment pins a release of the collection in
+`inventories/<env>/requirements.yml` (a git tag such as `collection-v0.2.0`),
+installed with `scripts/install-collection.sh <env>`. Each bump of the
+collection rewrites the pinned tag (a multicz mirror); remove the mirror of an
+environment to pin it by hand, for instance to let staging follow the
+releases while production waits. Only one version of the collection can be
+used in a run.

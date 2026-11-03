@@ -31,6 +31,8 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix` and
   Documenting a module carries the scope of that module.
 - `collection`: what else the `goabonga.vps` collection ships
   (`playbooks/`, `galaxy.yml`, `meta/`, `plugins/`).
+- `release`: versioning and releases (`multicz.toml`, the release
+  workflow, the changelogs).
 
 ### Environments
 
