@@ -1,0 +1,394 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+# Runs the site playbook in check mode (`--check --diff`) for every
+# environment once ci and release succeeded on `main`.
+#
+# A deployment is pending when the dry run reports changes OR when `main`
+# differs from `ansible/<env>` on the deployed paths (a first deployment
+# starts from a `ansible/<env>` branch created at the root commit). Then it
+# opens/updates a PR from `main` into `ansible/<env>` plus a tracking issue,
+# both with a SUMMARY only - merging that PR (once approved per the
+# branch's protection rules) triggers ansible-apply.yml, which closes the
+# issue.
+#
+# The full check output (it contains diffs of the host) is stored in the
+# private bucket of the infrastructure state (plans/ansible-<env>/<run id>/),
+# never posted to the PR, a log or an artifact. Pull requests and issues are
+# created with the GH_PAT personal access token, never with github-actions[bot].
+
+name: ansible-plan
+
+on: # zizmor: ignore[dangerous-triggers]
+  # After the release workflow (itself chained after ci) succeeded on main,
+  # so the dry run always sees the released main and never runs alongside ci.
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ansible-plan-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  discover-envs:
+    name: discover-envs
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    outputs:
+      envs: ${{ steps.list.outputs.envs }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - id: list
+        run: |
+          set -euo pipefail
+          # An environment is deployed by the pipelines when it pins a
+          # collection release; the others (a local development VM, for
+          # instance) are out of their reach.
+          envs=$(for d in inventories/*/; do
+            if [ -f "${d}requirements.yml" ]; then basename "$d"; fi
+          done | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "envs=$envs" >> "$GITHUB_OUTPUT"
+          {
+            echo "## discover-envs"
+            echo
+            echo "Environments of \`inventories/\` pinning a collection:"
+            echo "$envs" | jq -r '.[] | "- `" + . + "`"'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  plan:
+    name: plan (${{ matrix.env }})
+    needs: [discover-envs]
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJson(needs.discover-envs.outputs.envs) }}
+    runs-on: ubuntu-24.04
+    # Own GitHub Environment (own secrets), so that protecting the apply
+    # environment with required reviewers does not block this automatic
+    # dry run.
+    environment: ansible-${{ matrix.env }}-plan
+    steps:
+      - name: Require GH_PAT
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_PAT" ]; then
+            echo "::error::the GH_PAT secret (personal access token) is required"
+            exit 1
+          fi
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - run: uv sync --frozen --no-dev
+      - name: Configure ssh
+        env:
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VPS_SSH_KEY_CONTENT: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          # The host key comes from a secret, never from a scan of the
+          # network: an unexpected host makes the run fail.
+          if [ -z "$VPS_KNOWN_HOSTS" ]; then
+            echo "::error::the VPS_KNOWN_HOSTS secret (known_hosts line of the VPS) is required"
+            exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY_CONTENT" > ~/.ssh/ovh_vps
+          chmod 600 ~/.ssh/ovh_vps
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Install the pinned collection
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          ENV: ${{ matrix.env }}
+        run: scripts/install-collection.sh "$ENV"
+
+      - name: Ansible check
+        id: ansible
+        env:
+          ENV: ${{ matrix.env }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          set +e
+          # The version this deployment would get, as the apply will pass it.
+          DEPLOYMENT_VERSION=$(scripts/next-ansible-version.sh "$ENV")
+          uv run --no-sync ansible-playbook -i "inventories/${ENV}" \
+            goabonga.vps.site --check --diff \
+            -e "deployment_version=${DEPLOYMENT_VERSION}" > "plan-${ENV}.txt" 2>&1
+          rc=$?
+          if [ -z "$DEPLOYMENT_VERSION" ]; then rc=1; fi
+          # `ansible-playbook` exits 0 even when check mode reports
+          # changes: derive them from the PLAY RECAP instead.
+          changed=$(grep -E '^[^ ]+ +: ok=' "plan-${ENV}.txt" \
+            | sed -E 's/.*changed=([0-9]+).*/\1/' | paste -sd+ - | bc || true)
+          changed=${changed:-0}
+          # What main would change on the environment's ansible branch.
+          drift=0
+          : > "commits-${ENV}.txt"
+          : > "stat-${ENV}.txt"
+          if git rev-parse --verify -q "origin/ansible/${ENV}" >/dev/null; then
+            git diff --quiet "origin/ansible/${ENV}" HEAD \
+              -- inventories playbooks roles plugins meta || drift=1
+            git log --format='- %h %s' "origin/ansible/${ENV}..HEAD" \
+              -- inventories playbooks roles plugins meta | head -n 30 \
+              > "commits-${ENV}.txt"
+            git diff --stat "origin/ansible/${ENV}" HEAD \
+              -- inventories playbooks roles plugins meta > "stat-${ENV}.txt"
+          fi
+          if [ "$rc" -ne 0 ]; then code=1
+          elif [ "$changed" -gt 0 ] || [ "$drift" -eq 1 ]; then code=2
+          else code=0; fi
+          {
+            echo "exit_code=$code"
+            echo "changed=$changed"
+            echo "drift=$drift"
+            echo "version=$DEPLOYMENT_VERSION"
+          } >> "$GITHUB_OUTPUT"
+      - name: Show plan summary
+        # Recap lines and commit subjects only: the full output holds diffs.
+        env:
+          ENV_NAME: ${{ matrix.env }}
+          CHANGED: ${{ steps.ansible.outputs.changed }}
+          DRIFT: ${{ steps.ansible.outputs.drift }}
+          EXIT_CODE: ${{ steps.ansible.outputs.exit_code }}
+        run: |
+          grep -E '^[^ ]+ +: ok=' "plan-${ENV_NAME}.txt" || echo "(no recap line - see job status)"
+          BEHIND=$(grep -c . "commits-${ENV_NAME}.txt" || true)
+          case "$EXIT_CODE" in
+            0)
+              ALERT="NOTE"
+              VERDICT="Nothing to deploy"
+              HINT="No change reported and \`ansible/${ENV_NAME}\` is up to date with \`main\`."
+              ;;
+            2)
+              ALERT="IMPORTANT"
+              VERDICT="Deployment pending"
+              HINT="A pull request and a tracking issue were opened. Merge the pull request to apply."
+              ;;
+            *)
+              ALERT="CAUTION"
+              VERDICT="Check failed"
+              HINT="See the job log for the Ansible error."
+              ;;
+          esac
+          if [ "${DRIFT:-0}" = "1" ]; then STATE="${BEHIND} commit(s) ahead of \`ansible/${ENV_NAME}\`"; else STATE="up to date"; fi
+          {
+            echo "## Plan: \`${ENV_NAME}\`"
+            echo
+            echo "> [!${ALERT}]"
+            echo "> **${VERDICT}.** ${HINT}"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Environment | \`${ENV_NAME}\` |"
+            echo "| Check mode | ${CHANGED:-0} task(s) would change |"
+            echo "| \`main\` vs \`ansible/${ENV_NAME}\` | ${STATE} |"
+            if [ "${DRIFT:-0}" = "1" ] && [ -s "commits-${ENV_NAME}.txt" ]; then
+              echo
+              echo "### Not deployed yet"
+              echo
+              cat "commits-${ENV_NAME}.txt"
+            fi
+            echo
+            echo "### Ansible recap"
+            echo
+            echo "| Host | ok | changed | unreachable | failed | skipped |"
+            echo "| --- | ---: | ---: | ---: | ---: | ---: |"
+            awk '/^[^ ]+ +: ok=/ {
+              delete v
+              for (i = 3; i <= NF; i++) { split($i, a, "="); v[a[1]] = a[2] }
+              printf "| `%s` | %s | %s | %s | %s | %s |\n", $1, v["ok"], v["changed"], v["unreachable"], v["failed"], v["skipped"]
+            }' "plan-${ENV_NAME}.txt"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Show plan error
+        # Only the error lines: the full output stays out of the log.
+        if: steps.ansible.outputs.exit_code == '1'
+        env:
+          ENV_NAME: ${{ matrix.env }}
+        run: grep -iE -A3 'fatal|error|failed' "plan-${ENV_NAME}.txt" | head -n 40 || true
+      - name: Fail on plan error
+        if: steps.ansible.outputs.exit_code == '1'
+        run: exit 1
+
+      - name: Store the full check output in the state bucket
+        id: store
+        if: steps.ansible.outputs.exit_code == '2'
+        env:
+          ENV_NAME: ${{ matrix.env }}
+          RUN_ID: ${{ github.run_id }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # OVHcloud Object Storage does not support the default checksums.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          set -euo pipefail
+          # The check output holds diffs of the host: it goes to the private
+          # bucket of the infrastructure state (plans/ expires there), never to
+          # a public place such as a pull request, a log or an artifact.
+          CONFIG="infra/configs/${ENV_NAME}/config.yaml"
+          if [ -z "$AWS_ACCESS_KEY_ID" ] || [ ! -f "$CONFIG" ]; then
+            echo "::warning::the full output is not stored (no AWS secrets, or no ${CONFIG})"
+            echo "stored=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BUCKET=$(yq -r '.remote_state.bucket' "$CONFIG")
+          REGION=$(yq -r '.remote_state.region' "$CONFIG")
+          ENDPOINT=$(yq -r '.remote_state.endpoint' "$CONFIG")
+          KEY="plans/ansible-${ENV_NAME}/${RUN_ID}/plan.txt"
+          aws s3 cp "plan-${ENV_NAME}.txt" "s3://${BUCKET}/${KEY}" \
+            --endpoint-url "$ENDPOINT" --region "$REGION" --only-show-errors
+          {
+            echo "stored=true"
+            echo "bucket=$BUCKET"
+            echo "key=$KEY"
+            echo "region=$REGION"
+            echo "endpoint=$ENDPOINT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the deploy issue and pull request
+        if: steps.ansible.outputs.exit_code == '2'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          ENV_NAME: ${{ matrix.env }}
+          CHANGED: ${{ steps.ansible.outputs.changed }}
+          DEPLOYMENT_VERSION: ${{ steps.ansible.outputs.version }}
+          PLAN_STORED: ${{ steps.store.outputs.stored }}
+          PLAN_BUCKET: ${{ steps.store.outputs.bucket }}
+          PLAN_KEY: ${{ steps.store.outputs.key }}
+          PLAN_REGION: ${{ steps.store.outputs.region }}
+          PLAN_ENDPOINT: ${{ steps.store.outputs.endpoint }}
+          # Who the deploy pull request and issue are assigned to (repository
+          # variable DEPLOY_ASSIGNEE); defaults to the owner of GH_PAT.
+          ASSIGNEE: ${{ vars.DEPLOY_ASSIGNEE }}
+          # Who is asked to review the deploy pull request (repository
+          # variable DEPLOY_REVIEWER); defaults to the assignee.
+          REVIEWER: ${{ vars.DEPLOY_REVIEWER }}
+        run: |
+          set -euo pipefail
+          ASSIGNEE=${ASSIGNEE:-@me}
+          REVIEWER=${REVIEWER:-$ASSIGNEE}
+          if [ "$REVIEWER" = "@me" ]; then REVIEWER=$(gh api user --jq .login); fi
+          BASE="ansible/${ENV_NAME}"
+          if ! gh api "repos/${{ github.repository }}/branches/${BASE}" >/dev/null 2>&1; then
+            echo "::error::branch ${BASE} does not exist on origin - create it once from main (see README.md)"
+            exit 1
+          fi
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # The pull request head is the last commit of main that is not a
+          # release commit: those carry [skip ci], and GitHub skips the push
+          # workflows (the apply) when the head of the merge is such a commit.
+          HEAD_SHA=$(git log -1 --format=%H --invert-grep --grep='^chore(release)' HEAD)
+          HEAD_BRANCH="plan/ansible-${ENV_NAME}"
+          if gh api "repos/${{ github.repository }}/git/ref/heads/${HEAD_BRANCH}" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${{ github.repository }}/git/refs/heads/${HEAD_BRANCH}" \
+              -f sha="$HEAD_SHA" -F force=true --silent
+          else
+            gh api -X POST "repos/${{ github.repository }}/git/refs" \
+              -f ref="refs/heads/${HEAD_BRANCH}" -f sha="$HEAD_SHA" --silent
+          fi
+
+          # What is pending: shared by the issue and the pull request.
+          SUMMARY_FILE=$(mktemp)
+          {
+            echo "A deployment of **${ENV_NAME}** is pending."
+            echo
+            echo "- Check mode: ${CHANGED} task(s) would change."
+            if [ -s "commits-${ENV_NAME}.txt" ]; then
+              echo "- Commits not deployed yet:"
+              sed 's/^/  /' "commits-${ENV_NAME}.txt"
+            fi
+          } > "$SUMMARY_FILE"
+
+          # The tracking issue comes first so that the pull request can
+          # reference it. It never mentions the pull request: the link is
+          # made by the pull request's reference to the issue (the apply
+          # closes the issue, a pull request into a non-default branch
+          # cannot).
+          ISSUE_TITLE="ansible(${ENV_NAME}): pending deployment"
+          ISSUE_FILE="$SUMMARY_FILE"
+          ISSUE=$(gh issue list --state open --json number,title \
+            | jq -r --arg t "$ISSUE_TITLE" '.[] | select(.title == $t) | .number' | head -n1)
+          if [ -z "$ISSUE" ]; then
+            ISSUE_URL=$(gh issue create --title "$ISSUE_TITLE" --body-file "$ISSUE_FILE" --assignee "$ASSIGNEE")
+            ISSUE=${ISSUE_URL##*/}
+          else
+            gh issue edit "$ISSUE" --body-file "$ISSUE_FILE" --add-assignee "$ASSIGNEE"
+          fi
+
+          # Pull request: tracking issue and summary only. The diff and the full
+          # check output are not posted: this repository may be public.
+          PR_FILE=$(mktemp)
+          {
+            echo "Tracking issue: #${ISSUE}"
+            echo
+            cat "$SUMMARY_FILE"
+            echo "- Version to deploy: \`${DEPLOYMENT_VERSION}\`"
+            if [ -s "stat-${ENV_NAME}.txt" ]; then
+              echo
+              echo "Changed files:"
+              echo
+              echo '```'
+              cat "stat-${ENV_NAME}.txt"
+              echo '```'
+            fi
+            echo
+            if [ "${PLAN_STORED:-false}" = "true" ]; then
+              echo "The full check output is private, in the state bucket (run ${RUN_URL}):"
+              echo
+              echo '```sh'
+              echo "aws s3 cp s3://${PLAN_BUCKET}/${PLAN_KEY} - --endpoint-url ${PLAN_ENDPOINT} --region ${PLAN_REGION}"
+              echo '```'
+            else
+              echo "The full check output is not stored; see the run ${RUN_URL}."
+            fi
+          } > "$PR_FILE"
+          PR_NUMBER=$(gh pr list --base "$BASE" --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$PR_NUMBER" ]; then
+            PR_URL=$(gh pr create --base "$BASE" --head "$HEAD_BRANCH" \
+              --title "ansible(${ENV_NAME}): apply pending ansible changes" \
+              --assignee "$ASSIGNEE" --body-file "$PR_FILE")
+            PR_NUMBER=${PR_URL##*/}
+          else
+            gh pr edit "$PR_NUMBER" --body-file "$PR_FILE" --add-assignee "$ASSIGNEE"
+          fi
+          # GitHub refuses a review request addressed to the pull request's
+          # author: do not fail the run on it.
+          if ! gh pr edit "$PR_NUMBER" --add-reviewer "$REVIEWER"; then
+            echo "::warning::could not request a review from ${REVIEWER} (is it the author of the pull request?)"
+          fi
+
+      - name: Close stale deploy PR (plan is clean)
+        if: steps.ansible.outputs.exit_code == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          ENV_NAME: ${{ matrix.env }}
+        run: |
+          set -euo pipefail
+          BASE="ansible/${ENV_NAME}"
+          PR_NUMBER=$(gh pr list --base "$BASE" --head "plan/ansible-${ENV_NAME}" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr comment "$PR_NUMBER" --body "Dry run is now clean (no pending changes) - closing."
+            gh pr close "$PR_NUMBER"
+          fi
+          TITLE="ansible(${ENV_NAME}): pending deployment"
+          ISSUE=$(gh issue list --state open --json number,title \
+            | jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .number' | head -n1)
+          if [ -n "$ISSUE" ]; then
+            gh issue close "$ISSUE" --comment "No pending changes anymore - closing."
+          fi
