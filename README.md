@@ -45,3 +45,35 @@ playbook applies to every host.
 | Role | Description | Variables |
 | --- | --- | --- |
 | `version` | echoes the version being deployed on the host | `deployment_version`, set by the environment or passed with `-e` |
+
+## Usage
+
+The repository follows the standard Ansible layout:
+
+```
+ansible.cfg
+inventories/<env>/hosts.yml           # hosts of the environment
+inventories/<env>/group_vars/all/     # variables (main.yml, ansible.yml)
+inventories/<env>/requirements.yml    # collection release pinned for the environment
+inventories/<env>/CHANGELOG.md        # what each deployment shipped
+playbooks/site.yml                    # entry point
+roles/                                # reusable roles (version for now)
+```
+
+The `production` inventory targets the VPS as the `ubuntu` user and reads
+its connection settings from environment variables:
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `VPS_HOST` | IP address or hostname of the VPS | required |
+| `VPS_SSH_KEY` | path to the SSH private key | `~/.ssh/ovh_vps` |
+
+Roles are used through the collection (`goabonga.vps.version`). Install the
+one of the working tree in `./collections`, then check that the VPS is
+reachable (the `version` role echoes the version being deployed on the host):
+
+```sh
+scripts/install-collection.sh local
+export VPS_HOST=<vps-ip>
+uv run ansible-playbook -i inventories/production goabonga.vps.site
+```
