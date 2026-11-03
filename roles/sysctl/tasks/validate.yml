@@ -59,3 +59,12 @@
   loop: "{{ sysctl_parameters | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
+
+- name: Check the configuration file
+  ansible.builtin.assert:
+    that:
+      - sysctl_config_file is match('^/etc/sysctl[.]d/[A-Za-z0-9_.-]+[.]conf\\Z')
+    fail_msg: >-
+      Invalid sysctl_config_file {{ sysctl_config_file | to_json }}: it must be
+      a .conf file directly inside /etc/sysctl.d.
+    quiet: true

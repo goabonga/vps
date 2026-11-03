@@ -1,0 +1,7 @@
+# Ansible managed
+# Collection: goabonga.vps
+# Role: sysctl
+
+{% for name, value in sysctl_parameters | dictsort %}
+{{ name }} = {{ value }}
+{% endfor %}

@@ -20,3 +20,18 @@ argument_specs:
           - Kernel parameters to manage, as a mapping from the parameter name
             to its value.
           - An empty mapping leaves the host untouched.
+      sysctl_persistent:
+        type: bool
+        default: true
+        description:
+          - Write the parameters to C(sysctl_config_file) so that they survive a
+            reboot.
+          - When false the role creates and modifies no configuration file.
+      sysctl_config_file:
+        type: str
+        default: /etc/sysctl.d/90-goabonga-vps.conf
+        description:
+          - The only file the role manages, written with the parameters sorted
+            by name.
+          - It must be a C(.conf) file directly inside C(/etc/sysctl.d). The
+            role never touches C(/etc/sysctl.conf) nor any other file.

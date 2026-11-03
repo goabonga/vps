@@ -4,3 +4,7 @@
   block:
     - name: Check the host and the variables
       ansible.builtin.include_tasks: validate.yml
+
+    - name: Configure the kernel parameters
+      ansible.builtin.include_tasks: configure.yml
+      when: sysctl_parameters | length > 0

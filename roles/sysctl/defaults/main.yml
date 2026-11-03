@@ -5,3 +5,10 @@ sysctl_enabled: true
 # Kernel parameters to manage, for example:
 #   vm.swappiness: 10
 sysctl_parameters: {}
+
+# Write the parameters to sysctl_config_file, so that they survive a reboot.
+sysctl_persistent: true
+
+# The only file the role manages. It must be a .conf file of /etc/sysctl.d:
+# the role never touches /etc/sysctl.conf nor any other file.
+sysctl_config_file: /etc/sysctl.d/90-goabonga-vps.conf
