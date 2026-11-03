@@ -28,4 +28,5 @@ build_ignore:
   - inventories
   - multicz.toml
   - pyproject.toml
+  - scripts
   - uv.lock
