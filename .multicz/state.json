@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "git_head": "672643dbb1906f18b292200d2f3d53548726810d",
+  "git_head_short": "672643d",
+  "timestamp": "2026-11-03T23:19:03Z",
+  "components": {
+    "collection": {
+      "version": "0.1.0",
+      "tag": "collection-v0.1.0",
+      "tag_sha": null
+    },
+    "infra": {
+      "version": "0.1.0",
+      "tag": "infra-v0.1.0",
+      "tag_sha": null
+    },
+    "module-vps": {
+      "version": "0.1.0",
+      "tag": "module-vps-v0.1.0",
+      "tag_sha": null
+    },
+    "module-bootstrap": {
+      "version": "0.1.0",
+      "tag": "module-bootstrap-v0.1.0",
+      "tag_sha": null
+    }
+  }
+}

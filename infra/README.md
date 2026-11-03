@@ -1,5 +1,5 @@
 # infra
-| version 0.0.0
+| version 0.1.0
 
 OVHcloud infrastructure managed with Terragrunt and OpenTofu. It lives in
 `infra/` and is deployed by the `terragrunt-plan` and `terragrunt-apply`

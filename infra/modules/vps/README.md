@@ -1,5 +1,5 @@
 # vps
-| version 0.0.0
+| version 0.1.0
 
 Manages an existing OVHcloud VPS (`ovh_vps`) and the reverse DNS records of its
 addresses (`ovh_ip_reverse`). Import the VPS before the first plan, see

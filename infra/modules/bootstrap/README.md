@@ -1,5 +1,5 @@
 # bootstrap
-| version 0.0.0
+| version 0.1.0
 
 Creates what the other units need to store their state: the Public Cloud
 project (or uses an existing one), a user with the Object Storage operator

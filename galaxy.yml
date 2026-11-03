@@ -1,6 +1,6 @@
 namespace: goabonga
 name: vps
-version: 0.0.0
+version: 0.1.0
 readme: README.md
 authors:
   - Chris <goabonga@pm.me>
