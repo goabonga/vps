@@ -35,6 +35,7 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix`, `docs` 
   workflow, the changelogs).
 - `signatures`: signed commits and their checks (the `signatures`,
   `resign` and `resign-main` workflows).
+- `ansible`: the plan and apply workflows of the Ansible deployment and what they need to run.
 
 ### Environments
 
@@ -67,7 +68,8 @@ uv run ansible-playbook -i inventories/development goabonga.vps.site
 
 Versions, tags, changelogs and releases are produced by the pipelines with
 [multicz](https://goabonga.github.io/multicz/) from the commit messages: do
-not bump a version or edit a changelog by hand. See "Releases and
+not bump a version or edit a changelog by hand. A change reaches the VPS only
+through the deployment pull request the plan workflow opens; see "Releases and
 deployment" in the [README](README.md).
 
 ## Pull requests

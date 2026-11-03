@@ -19,5 +19,10 @@ This repository holds Ansible roles and playbooks that configure an OVH VPS.
 Please report anything that could expose credentials, weaken the
 configuration of the server or let someone run code on it.
 
+Deployments run from GitHub Actions. The credentials they use (SSH key, host
+key, personal access token, GPG key) live in GitHub secrets, scoped to the
+`ansible-production-apply` and `ansible-production-plan` environments when they allow it. They are
+never committed: report any trace of one in the history or in a log.
+
 Only signed commits should reach `main`, so a change is traceable to a key.
 Report any commit that seems to bypass this.
