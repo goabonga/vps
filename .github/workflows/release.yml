@@ -138,13 +138,13 @@ jobs:
         run: |
           set -euo pipefail
           uv tool run multicz plan --summary "$GITHUB_STEP_SUMMARY"
-          # ansible-<env> components are deployed state, not a library:
-          # they release only from ansible-apply.yml after a successful
+          # ansible-<env> and terragrunt-<env> components are deployed state, not a library:
+          # they release only from their apply workflow after a successful
           # apply, never from this generic push-to-main job.
           PLAN=$(uv tool run multicz plan --output json)
           # `plan --output json` may print a second JSON document (plugin
           # advice) without `bumps`: only read the document that has them.
-          COMPONENTS=$(echo "$PLAN" | jq -r 'select(.bumps != null) | .bumps | keys[] | select(startswith("ansible-") | not)')
+          COMPONENTS=$(echo "$PLAN" | jq -r 'select(.bumps != null) | .bumps | keys[] | select(startswith("ansible-") or startswith("terragrunt-") | not)')
           ARGS=""
           for c in $COMPONENTS; do ARGS="$ARGS --component $c"; done
           echo "args=$ARGS" >> "$GITHUB_OUTPUT"
