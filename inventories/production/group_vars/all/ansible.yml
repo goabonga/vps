@@ -1,0 +1,5 @@
+---
+# Version of the deployment, bumped by multicz after each successful apply.
+# The pipelines pass the version being deployed with `-e deployment_version=...`,
+# which takes precedence over this value (the previously deployed version).
+deployment_version: "0.0.0"
