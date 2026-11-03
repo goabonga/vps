@@ -1,27 +1,145 @@
 ---
-- name: Write the persistent configuration
-  ansible.builtin.template:
-    src: sysctl.conf.j2
-    dest: "{{ sysctl_config_file }}"
-    owner: root
-    group: root
-    mode: "0644"
-  become: true
-  when: sysctl_persistent | bool
-
-# The module also records each value in a file. With sysctl_persistent it is
-# the configuration file just written, which already holds the values, so it
-# is left as it is. Without it a file of /run is used, never a persistent one.
-- name: Apply the parameters at runtime
-  ansible.posix.sysctl:
-    name: "{{ item.key }}"
-    value: "{{ item.value }}"
-    state: present
-    sysctl_set: true
-    sysctl_file: "{{ sysctl_config_file if sysctl_persistent | bool else sysctl_runtime_file }}"
-    reload: false
+# Remembers what can be put back if the change fails midway.
+- name: Read the current values
+  ansible.builtin.command:
+    argv:
+      - sysctl
+      - -n
+      - "{{ item.key }}"
   loop: "{{ sysctl_effective | dict2items | sort(attribute='key') }}"
   loop_control:
     label: "{{ item.key }}"
-  become: true
+  register: sysctl_snapshot
+  changed_when: false
+  failed_when: false
+  check_mode: false
   when: sysctl_apply | bool
+
+- name: Keep the values that could be read
+  ansible.builtin.set_fact:
+    sysctl_previous: >-
+      {{ dict(sysctl_snapshot.results | selectattr('rc', 'equalto', 0) | map(attribute='item.key')
+      | zip(sysctl_snapshot.results | selectattr('rc', 'equalto', 0) | map(attribute='stdout'))) }}
+  when: sysctl_apply | bool
+
+- name: Look at the configuration file before the change
+  ansible.builtin.stat:
+    path: "{{ sysctl_config_file }}"
+  register: sysctl_file_before
+  when: sysctl_persistent | bool
+
+- name: Keep the content of the configuration file
+  ansible.builtin.slurp:
+    src: "{{ sysctl_config_file }}"
+  register: sysctl_file_content
+  when:
+    - sysctl_persistent | bool
+    - sysctl_file_before.stat.exists
+
+- name: Change the host
+  become: true
+  block:
+    - name: Write the persistent configuration
+      ansible.builtin.template:
+        src: sysctl.conf.j2
+        dest: "{{ sysctl_config_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when: sysctl_persistent | bool
+
+    # The module also records each value in a file. With sysctl_persistent it
+    # is the configuration file just written, which already holds the values,
+    # so it is left as it is. Without it a file of /run is used, never a
+    # persistent one.
+    - name: Apply the parameters at runtime
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_set: true
+        sysctl_file: "{{ sysctl_config_file if sysctl_persistent | bool else sysctl_runtime_file }}"
+        reload: false
+      loop: "{{ sysctl_effective | dict2items | sort(attribute='key') }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: sysctl_apply | bool
+  rescue:
+    # Best effort: put back what was there before, then fail with the report.
+    - name: Remember why it failed
+      ansible.builtin.set_fact:
+        sysctl_failure: >-
+          {{ ansible_failed_result.results | default([]) | selectattr('msg', 'defined') | map(attribute='msg') | join(' ')
+          or ansible_failed_result.msg | default('unknown error') }}
+
+    - name: Read the values after the failure
+      ansible.builtin.command:
+        argv:
+          - sysctl
+          - -n
+          - "{{ item }}"
+      loop: "{{ sysctl_previous | default({}) | list }}"
+      register: sysctl_after
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Put the previous values back
+      ansible.builtin.command:
+        argv:
+          - sysctl
+          - -w
+          - "{{ item.item }}={{ sysctl_previous[item.item] | split | join(' ') }}"
+      loop: "{{ sysctl_after.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      register: sysctl_restored
+      changed_when: true
+      ignore_errors: true
+      when:
+        - item.rc == 0
+        - (item.stdout | split | join(' ')) != (sysctl_previous[item.item] | split | join(' '))
+
+    - name: Put the configuration file back
+      ansible.builtin.copy:
+        content: "{{ sysctl_file_content.content | b64decode }}"
+        dest: "{{ sysctl_config_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: sysctl_file_restored
+      ignore_errors: true
+      when:
+        - sysctl_persistent | bool
+        - sysctl_file_before.stat.exists
+
+    - name: Remove the configuration file written by the failed run
+      ansible.builtin.file:
+        path: "{{ sysctl_config_file }}"
+        state: absent
+      register: sysctl_file_removed
+      ignore_errors: true
+      when:
+        - sysctl_persistent | bool
+        - not sysctl_file_before.stat.exists
+
+    - name: Summarize what was put back
+      ansible.builtin.set_fact:
+        sysctl_values_back: >-
+          {{ sysctl_restored.results | default([]) | rejectattr('skipped', 'defined')
+          | rejectattr('failed') | map(attribute='item.item') | list }}
+        sysctl_values_lost: >-
+          {{ sysctl_restored.results | default([]) | rejectattr('skipped', 'defined')
+          | selectattr('failed') | map(attribute='item.item') | list }}
+        sysctl_file_state: >-
+          {{ 'restored' if sysctl_file_restored is succeeded and sysctl_file_restored is not skipped
+          else 'removed' if sysctl_file_removed is succeeded and sysctl_file_removed is not skipped
+          else 'untouched' }}
+
+    - name: Fail with the report
+      ansible.builtin.fail:
+        msg: >-
+          Applying the sysctl parameters failed: {{ sysctl_failure | trim }}.
+          Previous state put back as far as possible: values put back
+          {{ sysctl_values_back }}, values that could not be put back
+          {{ sysctl_values_lost }}, configuration file {{ sysctl_file_state }}.
