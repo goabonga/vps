@@ -6,14 +6,17 @@
 
 TOFU       ?= tofu
 TERRAGRUNT ?= terragrunt
+TFDOCS     ?= terraform-docs
 
-.PHONY: help fmt fmt-check test clean
+.PHONY: help fmt fmt-check test docs docs-check clean
 
 help:
 	@echo "Targets:"
 	@echo "  make fmt        Format the modules and the Terragrunt files in place"
 	@echo "  make fmt-check  Check the formatting (as the ci workflow does)"
 	@echo "  make test       Run '$(TOFU) test' for every module that has a tests/ directory"
+	@echo "  make docs       Regenerate the tables of the module READMEs (terraform-docs)"
+	@echo "  make docs-check Fail when a module README is not up to date (as the ci workflow does)"
 	@echo "  make clean      Remove caches, generated files and test leftovers"
 
 fmt:
@@ -34,6 +37,12 @@ test:
 			(cd "$$dir" && $(TOFU) init -backend=false -input=false > /dev/null && $(TOFU) test) || exit 1; \
 		fi; \
 	done
+
+docs:
+	@for dir in modules/*/; do $(TFDOCS) -c .terraform-docs.yml "$$dir" > /dev/null || exit 1; done
+
+docs-check: docs
+	git diff --exit-code -- 'modules/*/README.md'
 
 clean:
 	find . -type d \( -name .terragrunt-cache -o -name .terraform \) -prune -exec rm -rf {} +
