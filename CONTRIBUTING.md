@@ -15,14 +15,14 @@ uv sync
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
 and are limited to a subject: no body, no footer, no `Co-Authored-By`
-trailer. A scope is a module listed in "Commit scopes" below; `feat`, `fix` and
-`docs` commits carry one. Keep each commit to one logical change that can be
+trailer. A scope is a module listed in "Commit scopes" below; `feat`, `fix`, `docs` and
+`ci` commits carry one. Keep each commit to one logical change that can be
 reverted on its own.
 
 ## Commit scopes
 
-A scope is a module, in kebab-case. Only these exist, and `feat`, `fix` and
-`docs` commits carry one; `chore`, `ci` and the others usually omit it.
+A scope is a module, in kebab-case. Only these exist, and `feat`, `fix`, `docs` and
+`ci` commits carry one; `chore` and the others usually omit it.
 
 ### General
 
