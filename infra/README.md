@@ -237,11 +237,15 @@ Same flow as the Ansible one (see the README of the repository):
    environment `terragrunt-<env>-plan`);
 2. if the plan has changes, or `main` differs from `terragrunt/<env>`, it opens
    a tracking issue and a pull request from `plan/terragrunt-<env>` into
-   `terragrunt/<env>`. The issue only carries the `Plan: N to add...` summary;
-   the pull request adds the diff and the plan output (limited in size). The
-   complete plan is stored in the private state bucket
-   (`plans/<env>/<run id>/plan.txt`), not as a workflow artifact, and the pull
-   request gives the `aws s3 cp` command to read it;
+   `terragrunt/<env>`. Both only carry a summary (`Plan: N to add...`, the
+   commits and the files not deployed yet): the diff and the full plan are not
+   posted, so that the repository can be public. The complete plan is stored in
+   the private state bucket (`plans/terragrunt-<env>/<run id>/plan.txt`), and
+   the pull request gives the `aws s3 cp` command to read it. The Ansible plan
+   does the same under `plans/ansible-<env>/`. The bootstrap expires everything
+   under `plans/` after `bootstrap.plans_retention_days` days (7 by default),
+   with a lifecycle rule limited to that prefix: run `scripts/bootstrap.sh
+   --remote` to create or change it;
 3. merging that pull request runs **terragrunt-apply** (GitHub environment
    `terragrunt-<env>-apply`): it realigns `terragrunt/<env>` on `main`, applies, bumps
    `terragrunt-<env>` with a signed release commit, fast-forwards `main`, and
