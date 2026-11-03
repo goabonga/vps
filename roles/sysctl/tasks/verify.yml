@@ -29,9 +29,18 @@
     item.rc != 0 or
     (item.stdout | split | join(' ')) != (item.item.value | string | split | join(' '))
 
+# In check mode nothing was applied, so the differences are what would change.
+- name: Report what would change
+  ansible.builtin.debug:
+    msg: "Check mode: the running kernel differs from the desired parameters:\n{{ sysctl_drift | join('\n') }}"
+  when:
+    - ansible_check_mode
+    - sysctl_drift | length > 0
+
 - name: Check that the running kernel has the desired values
   ansible.builtin.assert:
     that:
       - sysctl_drift | length == 0
     fail_msg: "The running kernel differs from the desired parameters:\n{{ sysctl_drift | join('\n') }}"
     quiet: true
+  when: not ansible_check_mode
