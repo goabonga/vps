@@ -16,6 +16,7 @@ tags:
 build_ignore:
   - .ansible
   - .dev
+  - .multicz
   - .github
   - .gitignore
   - .venv
@@ -25,5 +26,6 @@ build_ignore:
   - .python-version
   - ansible.cfg
   - inventories
+  - multicz.toml
   - pyproject.toml
   - uv.lock

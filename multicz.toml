@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+# multicz.toml - per-component versioning, changelogs and tags for the
+# goabonga.vps Ansible collection. Driven by Conventional Commits.
+# Docs: https://goabonga.github.io/multicz/
+#
+# The `collection` component is the reusable content (roles, playbooks,
+# plugins, galaxy.yml): a library, released on every push to `main` that
+# touches its paths.
+
+[project]
+commit_convention = "conventional"
+tag_format = "{component}-v{version}"
+initial_version = "0.0.0"
+state_file = ".multicz/state.json"
+# `[skip ci]` makes GitHub skip the workflows triggered by the release
+# commit push: a release must not trigger a run.
+release_commit_message = "chore(release): bump {summary}\n\n{body}\n\n[skip ci]"
+
+[project.bump_rules]
+feat = "minor"
+fix = "patch"
+perf = "patch"
+revert = "patch"
+deprecate = "minor"
+remove = "minor"
+
+[[project.changelog_sections]]
+title = "Added"
+types = ["feat"]
+
+[[project.changelog_sections]]
+title = "Deprecated"
+types = ["deprecate"]
+
+[[project.changelog_sections]]
+title = "Removed"
+types = ["remove"]
+
+[[project.changelog_sections]]
+title = "Fixed"
+types = ["fix"]
+
+[[project.changelog_sections]]
+title = "Performance"
+types = ["perf"]
+
+# --- collection: roles, playbooks, plugins - the reusable content -------
+[components.collection]
+paths = [
+    "galaxy.yml",
+    "meta/**",
+    "roles/**",
+    "playbooks/**",
+    "plugins/**",
+]
+bump_files = [
+    { file = "galaxy.yml", key = "version" },
+]
+changelog = "CHANGELOG.md"
