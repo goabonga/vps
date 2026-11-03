@@ -1,0 +1,10 @@
+---
+- name: Echo the version being deployed on the host
+  ansible.builtin.command:
+    cmd: echo "deployment_version={{ deployment_version }}"
+  register: version_echo
+  changed_when: false
+
+- name: Show the version echoed by the host
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: {{ version_echo.stdout }}"

@@ -29,14 +29,19 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix` and
 - `project`: the project files themselves (`README.md`, `CONTRIBUTING.md`,
   `SECURITY.md`): creating them or changing how they are organized.
   Documenting a module carries the scope of that module.
-- `collection`: what the `goabonga.vps` collection ships (`roles/`,
-  `playbooks/`, `galaxy.yml`, `meta/`, `plugins/`).
+- `collection`: what else the `goabonga.vps` collection ships
+  (`playbooks/`, `galaxy.yml`, `meta/`, `plugins/`).
 
 ### Environments
 
 - `inventory`: `ansible.cfg` and what every environment shares.
 - `production`: `inventories/production/` (hosts, variables, the
   collection it pins).
+
+### Roles
+
+- `version`: the `version` role (`roles/version/` and its line in
+  `playbooks/site.yml`).
 
 ## Reporting bugs and asking for features
 
