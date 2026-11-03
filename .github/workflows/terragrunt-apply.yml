@@ -1,0 +1,251 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+# Runs `terragrunt apply` for an environment once its deployment PR (opened by
+# terragrunt-plan.yml) is merged into `terragrunt/<env>`. Protect that branch
+# (required approving review) so only an authorized person can trigger this
+# - see infra/README.md.
+#
+# On a successful apply, bumps the `terragrunt-<env>` multicz component: if
+# commits touching `infra/configs/<env>/` itself already justify a bump, that
+# drives the version/kind; otherwise the deployment is still real and is
+# recorded as a forced patch bump. Either way the `upstream-notes` plugin
+# (see multicz.toml) pulls in what the `infra` and `module-*` commits this
+# deployment actually shipped.
+#
+# The terragrunt branch is realigned on `main` before the apply (whatever the
+# merge method, so nothing GitHub recreated, unsigned or duplicated, is
+# kept): the only new commit is the signed release commit, fast-forwarded
+# onto `main`, then `terragrunt/<env>` is moved to it with an explicit lease,
+# and the deployment gets its GitHub release (`terragrunt-<env>-v<version>`).
+#
+# The full output of the apply holds resource attributes: the job log and the
+# summary only keep its final lines. Everything is pushed with the GH_PAT
+# personal access token, never with github-actions[bot].
+
+name: terragrunt-apply
+
+on:
+  push:
+    branches: ["terragrunt/*"]
+
+concurrency:
+  group: terragrunt-apply-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-env:
+    name: resolve-env
+    # The bump below is pushed with the GH_PAT token, which (unlike
+    # GITHUB_TOKEN) triggers workflows: skip our own release commit, or every
+    # apply would re-trigger itself. Only that one: a deployment pull request
+    # may legitimately end with a collection release commit.
+    # `apply` depends on this job.
+    if: >-
+      !startsWith(github.event.head_commit.message, 'chore(release): bump terragrunt-')
+    runs-on: ubuntu-24.04
+    outputs:
+      env: ${{ steps.name.outputs.env }}
+    steps:
+      - id: name
+        run: |
+          echo "env=${GITHUB_REF_NAME#terragrunt/}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## resolve-env"
+            echo
+            echo "Branch \`${GITHUB_REF_NAME}\` deploys environment \`${GITHUB_REF_NAME#terragrunt/}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    name: apply (${{ needs.resolve-env.outputs.env }})
+    needs: [resolve-env]
+    runs-on: ubuntu-24.04
+    # Protect this environment (Settings -> Environments -> required
+    # reviewers, on a plan that supports it) for a second gate on top of
+    # terragrunt/<env> branch protection.
+    environment: terragrunt-${{ needs.resolve-env.outputs.env }}-apply
+    steps:
+      - name: Require GH_PAT
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_PAT" ]; then
+            echo "::error::the GH_PAT secret (personal access token) is required"
+            exit 1
+          fi
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: true
+      # NOTE: no python-version pin here - multicz needs Python >=3.12 and
+      # `uv tool install multicz` fails under 3.11.
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.13.2
+          tofu_wrapper: false
+      - uses: ./.github/actions/setup-terragrunt # zizmor: ignore[self-repository]
+      - name: Install multicz
+        run: uv tool install multicz
+      - name: Configure git author from the PAT owner
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          user=$(gh api user)
+          login=$(echo "$user" | jq -r .login)
+          git config user.name  "$(echo "$user" | jq -r '.name // .login')"
+          git config user.email "$(echo "$user" | jq -r .id)+${login}@users.noreply.github.com"
+      - name: Detect GPG availability
+        id: gpg
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ] && [ -n "$GPG_PASSPHRASE" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Import and unlock GPG key
+        if: steps.gpg.outputs.available == 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          echo test | gpg --batch --yes --passphrase "$GPG_PASSPHRASE" \
+            --pinentry-mode loopback --sign > /dev/null
+          KEY_ID=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/{print $5; exit}')
+          git config user.signingkey "$KEY_ID"
+          # GitHub only marks a signature "Verified" when the committer
+          # e-mail is one of the key's identities: use the key's first uid
+          # instead of the PAT owner's noreply address.
+          UID_LINE=$(gpg --list-secret-keys --with-colons | awk -F: '/^uid/{print $10; exit}')
+          git config user.name  "${UID_LINE% <*}"
+          git config user.email "$(echo "$UID_LINE" | sed -E 's/.*<(.*)>/\1/')"
+
+      - name: Align the terragrunt branch on main
+        id: align
+        run: |
+          set -euo pipefail
+          # Merging the deployment pull request is only the go signal. GitHub
+          # recreates the commits of a rebase or squash merge (unsigned, and
+          # as duplicates of the ones on main), so the branch is realigned on
+          # main: the playbook runs on what main holds, the only new commit
+          # is the signed release commit, and nothing GitHub recreated
+          # survives. Nothing is pushed before the apply succeeded.
+          git fetch origin main
+          echo "previous=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git switch -C "$GITHUB_REF_NAME" origin/main
+
+      - name: Terragrunt apply
+        shell: bash
+        env:
+          ENV: ${{ needs.resolve-env.outputs.env }}
+          OVH_CLIENT_ID: ${{ secrets.OVH_CLIENT_ID }}
+          OVH_CLIENT_SECRET: ${{ secrets.OVH_CLIENT_SECRET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "infra/configs/${ENV}/config.yaml" ]; then
+            echo "::error::infra/configs/${ENV}/config.yaml does not exist"
+            exit 1
+          fi
+          rc=0
+          terragrunt --non-interactive --working-dir infra/ovh \
+            run --all -- apply -auto-approve -no-color -input=false \
+            > apply-full.txt 2>&1 || rc=$?
+          # The full output holds resource attributes: keep the final lines
+          # only, and the errors when it failed.
+          grep -E 'Apply complete|Resources:|No changes' apply-full.txt | tee apply.txt || true
+          if [ "$rc" -ne 0 ]; then
+            grep -iE 'error' apply-full.txt | tee -a apply.txt || true
+            exit "$rc"
+          fi
+
+      - name: Bump terragrunt-<env> and sync terragrunt branch
+        env:
+          COMPONENT: terragrunt-${{ needs.resolve-env.outputs.env }}
+          GPG_AVAILABLE: ${{ steps.gpg.outputs.available }}
+          PREVIOUS: ${{ steps.align.outputs.previous }}
+        run: |
+          set -euo pipefail
+          SIGN_FLAG=""
+          if [ "$GPG_AVAILABLE" = "true" ]; then SIGN_FLAG="--sign"; fi
+
+          PLAN=$(uv tool run multicz plan --output json)
+          # `plan --output json` may print a second JSON document (plugin
+          # advice) without `bumps`: only read the document that has them.
+          PENDING=$(echo "$PLAN" | jq -r --arg c "$COMPONENT" 'select(.bumps != null) | .bumps[$c].kind // empty')
+          if [ -n "$PENDING" ]; then
+            uv tool run multicz bump --component "$COMPONENT" --commit --tag $SIGN_FLAG --output json | tee bump-result.json
+          else
+            # No commit on infra/configs/<env>/ itself justified a bump (the
+            # apply may have been driven by an infra or module change instead) -
+            # the deploy still happened, so record it.
+            uv tool run multicz bump --force "${COMPONENT}:patch" --commit --tag $SIGN_FLAG --output json | tee bump-result.json
+          fi
+
+          # Publish: the release commit lands on main as a fast-forward (main
+          # is rejected if it moved on meanwhile, before anything else is
+          # touched), then the terragrunt branch is realigned on it, then the tag.
+          git push origin "HEAD:main"
+          git push --force-with-lease="${GITHUB_REF_NAME}:${PREVIOUS}" \
+            origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
+          for tag in $(jq -r '.git.tags[]' bump-result.json); do
+            git push origin "refs/tags/${tag}"
+          done
+
+      - name: Create the GitHub release of the deployment
+        # `--latest=false`: the collection release stays the latest one.
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          ENV: ${{ needs.resolve-env.outputs.env }}
+        run: |
+          set -euo pipefail
+          COMMIT=$(jq -r '.git.commit' bump-result.json)
+          for tag in $(jq -r '.git.tags[]' bump-result.json); do
+            # The notes are the changelog entry multicz wrote at the bump:
+            # `release-notes --tag` rebuilds them from the commits and leaves
+            # out the upstream section (what the modules shipped).
+            awk -v v="${tag##*-v}" '/^## \[/ { keep = index($0, "## [" v "]") == 1; next } keep' \
+              "infra/configs/${ENV}/CHANGELOG.md" > "notes-${tag}.md"
+            if [ ! -s "notes-${tag}.md" ]; then
+              uv tool run multicz release-notes --tag "$tag" --output md > "notes-${tag}.md"
+            fi
+            gh release create "$tag" --target "$COMMIT" --title "$tag" \
+              --notes-file "notes-${tag}.md" --latest=false
+          done
+
+      - name: Close the deployment issue
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          ENV_NAME: ${{ needs.resolve-env.outputs.env }}
+        run: |
+          set -euo pipefail
+          TITLE="terragrunt(${ENV_NAME}): pending deployment"
+          ISSUE=$(gh issue list --state open --json number,title \
+            | jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .number' | head -n1)
+          if [ -n "$ISSUE" ]; then
+            gh issue close "$ISSUE" --comment "Deployed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          ENV_NAME: ${{ needs.resolve-env.outputs.env }}
+        run: |
+          NOTE="Environment \`${ENV_NAME}\`."
+          if [ -f bump-result.json ]; then
+            NOTE="${NOTE} Released: $(jq -r '[.git.tags[] | "`" + . + "`"] | join(", ")' bump-result.json)."
+          fi
+          scripts/summary.sh "apply (${ENV_NAME})" "$JOB_STATUS" --note "$NOTE" --file apply.txt
