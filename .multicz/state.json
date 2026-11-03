@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "git_head": "46a86ec0bc2c56d32a589cd1ed68b911988cff57",
-  "git_head_short": "46a86ec",
-  "timestamp": "2026-11-03T23:30:47Z",
+  "git_head": "2eccd630a2adbf663646f6d90d6356b69609e2e9",
+  "git_head_short": "2eccd63",
+  "timestamp": "2026-11-03T23:38:40Z",
   "components": {
-    "terragrunt-production": {
+    "ansible-production": {
       "version": "0.1.0",
-      "tag": "terragrunt-production-v0.1.0",
+      "tag": "ansible-production-v0.1.0",
       "tag_sha": null
     }
   }
