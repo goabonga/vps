@@ -1,0 +1,8 @@
+---
+# The collection used by the deployments of this environment, pinned to a
+# release tag. multicz rewrites the tag at each release of the collection
+# (see multicz.toml); remove that mirror to pin the environment by hand.
+collections:
+  - name: https://github.com/goabonga/vps.git
+    type: git
+    version: collection-v0.0.0
