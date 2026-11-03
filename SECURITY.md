@@ -18,3 +18,6 @@ answer, with a fix or a mitigation plan, before any public disclosure.
 This repository holds Ansible roles and playbooks that configure an OVH VPS.
 Please report anything that could expose credentials, weaken the
 configuration of the server or let someone run code on it.
+
+Only signed commits should reach `main`, so a change is traceable to a key.
+Report any commit that seems to bypass this.

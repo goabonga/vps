@@ -122,3 +122,23 @@ collection rewrites the pinned tag (a multicz mirror); remove the mirror of an
 environment to pin it by hand, for instance to let staging follow the
 releases while production waits. Only one version of the collection can be
 used in a run.
+
+## Branch protection and signed commits
+
+Only signed commits should reach `main`.
+
+The `signatures` check fails on a pull request containing a commit that
+GitHub does not show as verified. Add the `resign` label to the pull
+request (owner only) to run the **resign** workflow: it rebases the branch
+on `main`, re-signs every commit with the GPG key and pushes the result
+back, so the commits that get merged are signed. It needs the `GH_PAT`,
+`GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` secrets.
+
+GitHub's *Rebase and merge* recreates the commits of a pull request and does
+not sign them. When commits without any signature land on `main`, the
+**resign-main** workflow replays them on the previous head, re-signs them
+with the GPG key and moves `main` with an explicit lease (the hashes change,
+so pull again). The rewritten head starts a new ci and release chain,
+and the release workflow waits for it: its gate refuses unsigned commits.
+Only commits with no signature at all are rewritten, so the rewrite does
+not loop.

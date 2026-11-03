@@ -33,6 +33,8 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix`, `docs` 
   (`playbooks/`, `galaxy.yml`, `meta/`, `plugins/`).
 - `release`: versioning and releases (`multicz.toml`, the release
   workflow, the changelogs).
+- `signatures`: signed commits and their checks (the `signatures`,
+  `resign` and `resign-main` workflows).
 
 ### Environments
 
@@ -67,6 +69,13 @@ Versions, tags, changelogs and releases are produced by the pipelines with
 [multicz](https://goabonga.github.io/multicz/) from the commit messages: do
 not bump a version or edit a changelog by hand. See "Releases and
 deployment" in the [README](README.md).
+
+## Pull requests
+
+Every commit that reaches `main` must be signed. If a pull request fails the
+`signatures` check, ask the owner to add the `resign` label: the pipeline
+re-signs the commits. See "Branch protection and signed
+commits" in the [README](README.md).
 
 ## Reporting bugs and asking for features
 
