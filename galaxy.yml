@@ -27,6 +27,7 @@ build_ignore:
   - SECURITY.md
   - .python-version
   - ansible.cfg
+  - infra
   - inventories
   - multicz.toml
   - pyproject.toml
