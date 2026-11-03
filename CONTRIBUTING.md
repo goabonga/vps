@@ -36,6 +36,8 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix`, `docs` 
 - `signatures`: signed commits and their checks (the `signatures`,
   `resign` and `resign-main` workflows).
 - `ansible`: the plan and apply workflows of the Ansible deployment and what they need to run.
+- `terragrunt`: the plan and apply workflows of the Terragrunt deployment and
+  what they need to run.
 - `github`: the GitHub repository settings and the ci workflow
   (`.github/rulesets/`, branch protection, `ci.yml`, `scripts/summary.sh`).
 
@@ -43,9 +45,21 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix`, `docs` 
 
 - `inventory`: `ansible.cfg` and what every environment shares.
 - `production`: `inventories/production/` (hosts, variables, the
-  collection it pins).
+  collection it pins) and `infra/configs/production/` (the settings of its
+  infrastructure).
 - `development`: `inventories/development/` and the script creating its
   local VM.
+
+### Infrastructure
+
+- `infra`: the `infra/` directory: the Terragrunt wiring (`infra/ovh/`), the
+  Terraform modules (`infra/modules/`) and the tooling around them. The settings
+  of an environment (`infra/configs/<env>/`) carry the scope of that
+  environment.
+- `vps`: the `vps` Terraform module (`infra/modules/vps/`, its tests and its
+  documentation).
+- `bootstrap`: the state storage created before everything else
+  (`infra/bootstrap/`, `infra/modules/bootstrap/` and its script).
 
 ### Roles
 
