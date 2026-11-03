@@ -39,7 +39,6 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix` and
 - `inventory`: `ansible.cfg` and what every environment shares.
 - `production`: `inventories/production/` (hosts, variables, the
   collection it pins).
-
 - `development`: `inventories/development/` and the script creating its
   local VM.
 
@@ -47,6 +46,20 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix` and
 
 - `version`: the `version` role (`roles/version/` and its line in
   `playbooks/site.yml`).
+
+## Checking a change
+
+Run the checks on the working tree, then try the change on the development VM
+(see "Development environment" in the [README](README.md)) before proposing it:
+
+```sh
+uv run ansible-lint
+scripts/install-collection.sh local
+uv run ansible-playbook -i inventories/development --syntax-check goabonga.vps.site
+uv tool run multicz validate --strict
+scripts/dev-vm.sh up
+uv run ansible-playbook -i inventories/development goabonga.vps.site
+```
 
 ## Reporting bugs and asking for features
 

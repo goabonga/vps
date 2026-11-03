@@ -78,6 +78,30 @@ export VPS_HOST=<vps-ip>
 uv run ansible-playbook -i inventories/production goabonga.vps.site
 ```
 
+## Development environment
+
+`inventories/development` targets a VM on local KVM, created from the same
+Ubuntu 26.04 cloud image as the VPS, with the same `ubuntu` user. It needs
+libvirt (system connection, your user in the `libvirt` group), a `default`
+network, a storage pool named `images`, `qemu-img` and `xorriso`.
+
+```sh
+scripts/dev-vm.sh up        # create (first time), start, wait for SSH
+scripts/install-collection.sh local
+uv run ansible-playbook -i inventories/development goabonga.vps.site
+scripts/dev-vm.sh ssh       # shell on the VM
+scripts/dev-vm.sh down      # shut it down (destroy deletes it)
+```
+
+The VM always answers at `192.168.122.61` (a DHCP reservation on the
+`default` network), so no variable is needed. The SSH key pair and the
+downloaded image are generated once in `.dev/` (not committed) and reused
+when the VM is recreated. This environment uses the collection of the working
+tree, not a pinned release, to try roles before they are released, so it has
+no `requirements.yml`. The collection installed in `./collections` is shared
+with the pinned installs (`scripts/install-collection.sh <env>`): the last one
+installed wins.
+
 ## Releases and deployment
 
 Components are versioned by [multicz](https://goabonga.github.io/multicz/)
