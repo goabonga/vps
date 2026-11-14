@@ -1,0 +1,34 @@
+---
+- name: Manage the network namespaces
+  when: netns_enabled | bool
+  block:
+    - name: Check the host and the variables
+      ansible.builtin.include_tasks: validate.yml
+
+    - name: Install the program and the unit
+      ansible.builtin.include_tasks: install.yml
+
+    - name: Create or fix the namespaces
+      ansible.builtin.include_tasks: present.yml
+      loop: "{{ netns_present }}"
+      loop_control:
+        loop_var: netns_item
+        label: "{{ netns_item.name }}"
+
+    - name: Delete the namespaces
+      ansible.builtin.include_tasks: absent.yml
+      loop: "{{ netns_absent + netns_pruned }}"
+      loop_control:
+        loop_var: netns_name
+
+    - name: Turn on the routing
+      ansible.builtin.include_tasks: forwarding.yml
+      when: netns_ip_forward | bool or netns_ipv6_forward | bool
+
+    - name: Verify the namespaces
+      ansible.builtin.include_tasks: verify.yml
+      loop: "{{ netns_present }}"
+      loop_control:
+        loop_var: netns_item
+        label: "{{ netns_item.name }}"
+      when: netns_verify | bool

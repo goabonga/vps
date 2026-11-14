@@ -1,0 +1,35 @@
+---
+- name: Install iproute2
+  ansible.builtin.apt:
+    name: iproute2
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+- name: Create the directory of the descriptions
+  ansible.builtin.file:
+    path: "{{ netns_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Install the program
+  ansible.builtin.copy:
+    src: goabonga-netns
+    dest: "{{ netns_helper }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Install the unit
+  ansible.builtin.template:
+    src: goabonga-netns.service.j2
+    dest: "/etc/systemd/system/{{ netns_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true

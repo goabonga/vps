@@ -1,0 +1,94 @@
+---
+# The site playbook does not gather facts: the role asks for the few it needs.
+- name: Gather the minimal facts
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+
+- name: Check that the host runs Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Ubuntu'
+    fail_msg: >-
+      The netns role only supports Ubuntu, found
+      {{ ansible_facts['distribution'] }}.
+    quiet: true
+
+- name: Check the paths and the unit
+  ansible.builtin.assert:
+    that:
+      - netns_config_dir is match('^/')
+      - netns_dns_dir is match('^/')
+      - netns_helper is match('^/')
+      - netns_sysctl_file is match('^/')
+      - netns_unit is match('^[A-Za-z0-9_.-]+@[.]service\Z')
+    fail_msg: >-
+      netns_config_dir, netns_dns_dir, netns_helper and netns_sysctl_file must be
+      absolute paths, and netns_unit a template unit such as goabonga-netns@.service.
+    quiet: true
+
+- name: Sort the namespaces by state
+  ansible.builtin.set_fact:
+    # state is optional: a namespace that does not say is present.
+    netns_present: >-
+      {{ (netns_namespaces | selectattr('state', 'undefined') | list)
+         + (netns_namespaces | selectattr('state', 'defined') | selectattr('state', 'eq', 'present') | list) }}
+    netns_absent: >-
+      {{ netns_namespaces | selectattr('state', 'defined') | selectattr('state', 'eq', 'absent')
+         | map(attribute='name') | list }}
+    netns_descriptions: []
+
+- name: Describe the namespaces to keep
+  ansible.builtin.set_fact:
+    netns_descriptions: "{{ netns_descriptions + [lookup('ansible.builtin.template', 'namespace.json.j2') | from_json] }}"
+  loop: "{{ netns_present }}"
+  loop_control:
+    loop_var: netns_item
+    label: "{{ netns_item.name }}"
+
+# Everything that can be checked without the host is checked here, on the
+# controller, before anything is changed: syntax of the addresses, gateways,
+# overlapping networks, names declared twice, names too long.
+- name: Check the namespaces as a whole
+  ansible.builtin.command:
+    argv:
+      - "{{ role_path }}/files/goabonga-netns"
+      - validate
+    stdin: "{{ {'namespaces': netns_descriptions} | to_json }}"
+  delegate_to: localhost
+  become: false
+  register: netns_validation
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Refuse an inconsistent description
+  ansible.builtin.assert:
+    that:
+      - netns_validation.rc == 0
+    fail_msg: >-
+      The namespaces are inconsistent:
+      {{ (netns_validation.stdout | from_json).problems | default([netns_validation.stderr]) | join('; ') }}
+    quiet: true
+
+- name: Check that the names to delete are not also declared
+  ansible.builtin.assert:
+    that:
+      - netns_absent | intersect(netns_present | map(attribute='name') | list) | length == 0
+    fail_msg: A namespace is declared both present and absent.
+    quiet: true
+
+- name: Look for the namespaces the role created
+  ansible.builtin.find:
+    paths: "{{ netns_config_dir }}"
+    patterns: "*.json"
+  register: netns_known
+  become: true
+
+- name: Find the namespaces that are no longer declared
+  ansible.builtin.set_fact:
+    netns_pruned: >-
+      {{ (netns_known.files | map(attribute='path') | map('basename') | map('regex_replace', '[.]json$', '') | list)
+         | difference(netns_present | map(attribute='name') | list)
+         | difference(netns_absent)
+         if netns_prune | bool else [] }}

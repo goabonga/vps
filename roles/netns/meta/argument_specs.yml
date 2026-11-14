@@ -1,0 +1,278 @@
+---
+argument_specs:
+  main:
+    short_description: Manage Linux network namespaces
+    description:
+      - Creates and keeps network namespaces, each linked to the host by its own
+        veth pair, with its addresses, routes and DNS servers, and a systemd
+        unit that rebuilds it at boot. It handles the network resources only.
+        It adds no NAT, no filtering and no forwarding unless asked, and it
+        installs and configures no application.
+      - Everything is checked before the host is touched, and the role never
+        changes an interface or a namespace it did not create.
+    options:
+      netns_enabled:
+        type: bool
+        default: true
+        description:
+          - When false the role does nothing.
+      netns_namespaces:
+        type: list
+        elements: dict
+        default: []
+        description:
+          - The namespaces to manage.
+        options:
+          name:
+            type: str
+            required: true
+            description:
+              - The name of the namespace, as C(ip netns) knows it.
+          state:
+            type: str
+            default: present
+            choices:
+              - present
+              - absent
+            description:
+              - C(absent) deletes the namespace and what the role keeps for it.
+              - The deletion is refused while a process or a unit uses the
+                namespace, unless C(netns_force_remove) is set.
+          loopback:
+            type: bool
+            default: true
+            description:
+              - Bring the loopback of the namespace up.
+          interfaces:
+            type: list
+            elements: dict
+            default: []
+            description:
+              - The veth pairs linking the namespace to the host, one pair per
+                interface, in a star around the host. No bridge is created.
+            options:
+              name:
+                type: str
+                required: true
+                description:
+                  - The name of the end that lives in the namespace, 15
+                    characters at most.
+              host_name:
+                type: str
+                required: true
+                description:
+                  - The name of the end that stays on the host, 15 characters at
+                    most and unique on the host.
+              mtu:
+                type: int
+                description:
+                  - The MTU of both ends. Left to the system when not set.
+              ipv4:
+                type: dict
+                description:
+                  - The IPv4 address of the end in the namespace.
+                options:
+                  address:
+                    type: str
+                    required: true
+                    description:
+                      - The address with its prefix length, such as C(10.200.1.2/30).
+                  gateway:
+                    type: str
+                    description:
+                      - The default gateway, an address of the same network.
+              ipv6:
+                type: dict
+                description:
+                  - The IPv6 address of the end in the namespace.
+                options:
+                  address:
+                    type: str
+                    required: true
+                    description:
+                      - The address with its prefix length.
+                  gateway:
+                    type: str
+                    description:
+                      - The default gateway, an address of the same network.
+              host_ipv4:
+                type: dict
+                description:
+                  - The IPv4 address of the end on the host.
+                options:
+                  address:
+                    type: str
+                    required: true
+                    description:
+                      - The address with its prefix length.
+              host_ipv6:
+                type: dict
+                description:
+                  - The IPv6 address of the end on the host.
+                options:
+                  address:
+                    type: str
+                    required: true
+                    description:
+                      - The address with its prefix length.
+              default_route:
+                type: bool
+                default: true
+                description:
+                  - Install a default route through the gateways. Set it to false
+                    for an interface that is only reached, never left through.
+              routes:
+                type: list
+                elements: dict
+                default: []
+                description:
+                  - Static routes of the namespace through this interface.
+                options:
+                  to:
+                    type: str
+                    required: true
+                    description:
+                      - The destination network, or C(default).
+                  via:
+                    type: str
+                    description:
+                      - The gateway, an address of the network of the interface.
+                  metric:
+                    type: int
+                    description:
+                      - The metric of the route.
+          dns:
+            type: dict
+            description:
+              - The DNS configuration of the namespace, written to
+                C(/etc/netns/<name>/resolv.conf). The namespace of the host keeps
+                its own C(/etc/resolv.conf).
+              - C(ip netns exec) reads that file. A service started by systemd
+                with C(NetworkNamespacePath=) does not, so the C(attach) entry
+                point of the role binds it onto C(/etc/resolv.conf) of the unit.
+            options:
+              nameservers:
+                type: list
+                elements: str
+                default: []
+                description:
+                  - The addresses of the DNS servers.
+              search:
+                type: list
+                elements: str
+                default: []
+                description:
+                  - The search domains.
+              options:
+                type: list
+                elements: str
+                default: []
+                description:
+                  - The C(options) of the resolver, such as C(timeout:2).
+          sysctl:
+            type: dict
+            default: {}
+            description:
+              - Kernel parameters of the namespace only (C(net.*)), as a mapping
+                from a name to a value.
+      netns_ip_forward:
+        type: bool
+        default: false
+        description:
+          - Turn on the routing of IPv4 packets between the interfaces of the
+            host, and keep it on after a reboot.
+          - The namespaces reach each other through the routing of the host, so
+            nothing passes between them while this is off, unless something else
+            already turned it on (Kubernetes does).
+          - The role never turns it off.
+      netns_ipv6_forward:
+        type: bool
+        default: false
+        description:
+          - The same for IPv6.
+      netns_prune:
+        type: bool
+        default: false
+        description:
+          - Delete the namespaces this role created that are no longer declared.
+          - A namespace it did not create is never deleted.
+      netns_force_remove:
+        type: bool
+        default: false
+        description:
+          - Allow the deletion of a namespace that processes or units still use.
+      netns_verify:
+        type: bool
+        default: true
+        description:
+          - Check that each namespace matches its description, that its interfaces
+            are up and that its unit is active, and fail when it does not.
+      netns_config_dir:
+        type: path
+        default: /etc/goabonga-netns
+        description:
+          - Where the description of each namespace is kept.
+      netns_dns_dir:
+        type: path
+        default: /etc/netns
+        description:
+          - The directory C(ip netns) reads the files of each namespace from.
+      netns_helper:
+        type: path
+        default: /usr/local/sbin/goabonga-netns
+        description:
+          - Where the program applying a description is installed.
+      netns_unit:
+        type: str
+        default: goabonga-netns@.service
+        description:
+          - The template unit that builds a namespace at boot.
+      netns_sysctl_file:
+        type: path
+        default: /etc/sysctl.d/90-goabonga-netns.conf
+        description:
+          - The file written when the routing is turned on.
+  attach:
+    short_description: Run a systemd service inside a namespace
+    description:
+      - Writes a drop-in for a service unit so that it runs in the network
+        namespace, and only starts once that namespace exists and is configured.
+      - Use it from the role of the service, with C(ansible.builtin.include_role)
+        and C(tasks_from=attach). The package and the configuration of the
+        service stay in its own role, on the host as usual. Only the way its
+        process is started changes.
+    options:
+      netns_attach_unit:
+        type: str
+        required: true
+        description:
+          - The service unit, such as C(squid.service).
+      netns_attach_namespace:
+        type: str
+        required: true
+        description:
+          - The namespace it runs in, declared with C(netns_namespaces).
+      netns_attach_state:
+        type: str
+        default: present
+        choices:
+          - present
+          - absent
+        description:
+          - C(absent) removes the drop-in.
+      netns_attach_dns:
+        type: bool
+        default: true
+        description:
+          - Bind the C(resolv.conf) of the namespace onto C(/etc/resolv.conf) of
+            the service. The namespace must declare C(dns).
+      netns_attach_restart:
+        type: bool
+        default: true
+        description:
+          - Restart the service when the drop-in changes, if it is running.
+      netns_dns_dir:
+        type: path
+        default: /etc/netns
+        description:
+          - The directory the C(resolv.conf) of the namespace is read from.

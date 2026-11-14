@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: netns
+  author: Chris
+  description: Manages Linux network namespaces and their veth links declaratively, with systemd.
+  license: MIT
+  min_ansible_version: "2.18"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - resolute
+  galaxy_tags:
+    - netns
+    - network
+    - veth
+dependencies: []

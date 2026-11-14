@@ -1,0 +1,22 @@
+---
+# A unit that is active does not prove that the network works: ask the program
+# to compare the real interfaces and routes with the description, and to check
+# that they are up.
+- name: Check that the namespace works
+  ansible.builtin.command:
+    argv: "{{ [netns_helper, 'check', '-'] }}"
+    stdin: "{{ lookup('ansible.builtin.template', 'namespace.json.j2') }}"
+  register: netns_check
+  changed_when: false
+  failed_when: netns_check.rc != 0
+  check_mode: false
+  become: true
+
+- name: Check that the unit of the namespace is active
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ netns_unit | replace('@', '@' ~ netns_item.name) }}"
+  changed_when: false
+  check_mode: false

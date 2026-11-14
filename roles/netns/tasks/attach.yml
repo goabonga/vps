@@ -1,0 +1,77 @@
+---
+- name: Check what to attach
+  ansible.builtin.assert:
+    that:
+      - netns_attach_unit is match('^[A-Za-z0-9_.@-]+[.]service\Z')
+      - netns_attach_namespace is match('^[A-Za-z0-9_.-]{1,64}\Z')
+      - netns_attach_state | default('present') in ['present', 'absent']
+    fail_msg: >-
+      netns_attach_unit must be a service unit, netns_attach_namespace a namespace
+      name and netns_attach_state present or absent.
+    quiet: true
+
+- name: Create the directory of the drop-ins of the service
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ netns_attach_unit }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: netns_attach_state | default('present') == 'present'
+
+- name: Write the drop-in of the service
+  ansible.builtin.template:
+    src: attach.conf.j2
+    dest: "/etc/systemd/system/{{ netns_attach_unit }}.d/netns.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  register: netns_attach_dropin
+  when: netns_attach_state | default('present') == 'present'
+
+- name: Remove the drop-in of the service
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ netns_attach_unit }}.d/netns.conf"
+    state: absent
+  become: true
+  register: netns_detach_dropin
+  when: netns_attach_state | default('present') == 'absent'
+
+- name: Look for what else the directory of the drop-ins holds
+  ansible.builtin.find:
+    paths: "/etc/systemd/system/{{ netns_attach_unit }}.d"
+    file_type: any
+  register: netns_dropin_leftovers
+  become: true
+  when: netns_attach_state | default('present') == 'absent'
+
+# Only an empty directory is removed: the drop-in of someone else is never touched.
+- name: Remove the directory of the drop-ins when it is empty
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ netns_attach_unit }}.d"
+    state: absent
+  become: true
+  when:
+    - netns_attach_state | default('present') == 'absent'
+    - netns_dropin_leftovers.matched | default(1) == 0
+
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  become: true
+  when: netns_attach_dropin is changed or netns_detach_dropin is changed
+
+# try-restart restarts a service that is running and leaves a stopped one alone.
+- name: Restart the service so that it runs where it should
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - try-restart
+      - "{{ netns_attach_unit }}"
+  become: true
+  changed_when: true
+  when:
+    - netns_attach_restart | default(true) | bool
+    - netns_attach_dropin is changed or netns_detach_dropin is changed
