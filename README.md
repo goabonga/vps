@@ -46,6 +46,127 @@ playbook applies to every host.
 | --- | --- | --- |
 | `version` | echoes the version being deployed on the host | `deployment_version`, set by the environment or passed with `-e` |
 | `sysctl` | manages kernel parameters: validates them, writes them to a file of `/etc/sysctl.d`, applies and verifies them at runtime, with the `security`, `network`, `memory` and `filesystem` profiles; it does nothing until parameters or profiles are given | `sysctl_enabled`, `sysctl_parameters`, `sysctl_profiles`, `sysctl_persistent`, `sysctl_apply`, `sysctl_verify`, `sysctl_strict`, `sysctl_config_file`, described by `ansible-doc -t role goabonga.vps.sysctl` |
+| `netns` | manages Linux network namespaces declaratively: one veth pair per interface in a star around the host, IPv4 and IPv6 addresses, routes, MTU, a `resolv.conf` and kernel parameters per namespace, and a systemd unit rebuilding each at boot; it adds no NAT, no filtering and no forwarding unless asked, and never touches an interface or a namespace it did not create; it does nothing until namespaces are declared | `netns_enabled`, `netns_namespaces`, `netns_ip_forward`, `netns_ipv6_forward`, `netns_prune`, `netns_force_remove`, `netns_verify`, `netns_config_dir`, `netns_dns_dir`, `netns_helper`, `netns_unit`, `netns_sysctl_file`, described by `ansible-doc -t role goabonga.vps.netns` |
+
+### Network namespaces
+
+The `netns` role gives a service a network of its own. It handles the network
+resources only: the packages and the configuration of the service stay in the
+role of the service.
+
+```
+                       HOST
+                         |
+              routing table of the host
+                         |
+           +-------------+-------------+
+           |             |             |
+      veth-squid     veth-oidc     veth-stepca
+           |             |             |
+         squid          oidc         stepca
+```
+
+Each namespace has its own veth pair, and there is no bridge: the namespaces
+reach each other through the routing of the host, which is where they can be
+filtered. A namespace is declared in the inventory:
+
+```yaml
+netns_namespaces:
+  - name: squid
+    interfaces:
+      - name: eth0                  # the end inside the namespace
+        host_name: veth-squid       # the end on the host, 15 characters at most
+        ipv4:
+          address: 10.200.3.2/30
+          gateway: 10.200.3.1
+        host_ipv4:
+          address: 10.200.3.1/30
+        # also: ipv6, host_ipv6, mtu, default_route, routes
+    dns:
+      nameservers: [10.200.2.2]
+      search: [int.example.com]
+    sysctl:
+      net.ipv4.conf.all.arp_ignore: 1
+  - name: oidc
+    state: absent                   # deletes it, refused while it is in use
+```
+
+Everything is checked before the host is touched: the syntax of the addresses,
+the gateways, the networks that overlap between namespaces or with a network the
+host already uses, the names declared twice and the names over 15 characters.
+A second run changes nothing, `--check` and `--diff` work, and the role never
+changes an interface or a namespace it did not create (they carry a mark that
+the role puts on its own).
+
+#### Running a service in its namespace
+
+The packages and the configuration are installed on the host as usual: a
+namespace holds processes, not files. Only the way the process starts changes,
+and the role of the service asks for it with the `attach` entry point of this
+role, for example in a `squid` role:
+
+```yaml
+- name: Run squid in its namespace
+  ansible.builtin.include_role:
+    name: goabonga.vps.netns
+    tasks_from: attach
+  vars:
+    netns_attach_unit: squid.service
+    netns_attach_namespace: squid
+```
+
+It writes a drop-in for the unit with `NetworkNamespacePath=/run/netns/squid`,
+`Requires=` and `After=` on the unit that builds the namespace, so that the
+service starts only once the namespace exists and is configured, and restarts
+the service if it was running. The service must listen on the address of the
+namespace, here `10.200.3.2`, not on the one of the host.
+
+The namespaces are in `/run/netns`, which does not survive a reboot: the unit
+`goabonga-netns@<name>.service` rebuilds each of them at boot with the same
+program Ansible uses, and is active only when the interfaces and the routes it
+finds match the description.
+
+#### DNS
+
+`ip netns exec <name> …` reads `/etc/netns/<name>/resolv.conf`. A service
+started by systemd with `NetworkNamespacePath=` does not: the `attach` entry
+point binds that file onto the `/etc/resolv.conf` of the unit, in its own mount
+namespace, whatever manages the one of the host (`systemd-resolved` included).
+The role runs no DNS server, and never changes the `/etc/resolv.conf` of the host.
+
+#### Filtering, forwarding and Kubernetes
+
+The role opens no port, adds no NAT and changes no rule of the firewall. The
+traffic between namespaces and the host is yours to allow, in nftables, on the
+`veth-*` interfaces of the host. Packets pass from one namespace to another
+only when the host routes them: set `netns_ip_forward` (and `netns_ipv6_forward`)
+to turn it on, which the role never turns off, as something else may need it.
+Without NAT a namespace has no access to the outside: a service that needs it
+goes through a proxy or through a rule of yours.
+
+k3s, containerd and the network plugin of the cluster stay in the network
+namespace of the host, and nothing in the role touches them. Use addresses that
+do not overlap their networks (`10.42.0.0/16` and `10.43.0.0/16` for k3s).
+
+#### Removal and limits
+
+`state: absent` deletes the interfaces and the namespace the role created, its
+description and its DNS file, and refuses while a process or a unit uses the
+namespace (`netns_force_remove` allows it). A namespace that is merely no longer
+declared is left alone, unless `netns_prune` is set, and one the role did not
+create is never deleted. A namespace does not isolate the processes or their
+privileges: it separates their network only.
+
+Changing the interfaces of a namespace does not touch the network interface of
+the host that SSH uses, so it does not cut the connection, but a gateway or a
+route that overlaps a network you reach the host through would: the role refuses
+an address that overlaps a network the host already uses.
+
+To investigate, `ip netns list`, `ip -n <name> addr`, `ip -n <name> route`,
+`systemctl status goabonga-netns@<name>`, and `goabonga-netns check -` with the
+description of the namespace (`/etc/goabonga-netns/<name>.json`) on its standard
+input, which lists what differs. The program is tested in namespaces of its own
+(`uv run pytest tests/unit`).
 
 ## Infrastructure
 
