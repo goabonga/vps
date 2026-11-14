@@ -1,0 +1,584 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+# ruff: noqa: S603, S607
+# Every command is ip (or sysctl through it), found in the fixed PATH below, with
+# arguments this program builds from a description it has validated: nothing
+# comes from a shell and nothing from the environment.
+"""Reconcile one Linux network namespace with its description.
+
+The goabonga.vps.netns role renders one JSON description per namespace and
+calls this program, both when it changes it and at each boot through a systemd
+unit, so that the two paths cannot differ. The program reads the real state
+with ``ip -j``, compares it with the description and applies only the
+difference. It manages the network resources only: no NAT, no filtering, no
+forwarding, no service.
+
+Commands (all print a JSON object on the standard output):
+
+  apply CONFIG [--dry-run]   create or fix what differs; the output lists the
+                             actions taken (or that would be, with --dry-run).
+                             CONFIG is a file, or - for the standard input
+  check CONFIG               exit 1 unless the namespace matches CONFIG and its
+                             interfaces are up
+  validate                   read {"namespaces": [CONFIG, ...]} on the standard
+                             input and report every problem of the set as a
+                             whole (syntax, gateways, overlapping subnets,
+                             duplicate names); it changes and reads nothing
+  down CONFIG [--force] [--dry-run]
+                             delete the interfaces and the namespace; refuses
+                             when a process still uses it, unless --force
+
+Ownership: every veth end the program creates gets the interface alias
+``goabonga-netns:<namespace>``, and a namespace it creates gets a file in the
+state directory. It never changes or deletes what does not carry them.
+"""
+
+import argparse
+import ipaddress
+import json
+import os
+import re
+import subprocess
+import sys
+
+# The program runs as root, often from a unit: it never trusts the PATH it inherits.
+SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+MARKER_PREFIX = "goabonga-netns:"
+NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
+NAMESPACE_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+STATIC_PROTOCOLS = {"boot", "static"}
+
+
+class Error(Exception):
+    """A situation the program must not resolve by itself."""
+
+
+def ip(*arguments, namespace=None):
+    """Run ``ip -j`` (in a namespace) and return its decoded output."""
+    command = ["ip", "-j"]
+    if namespace:
+        command += ["-n", namespace]
+    command += list(arguments)
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise Error(f"{' '.join(command)}: {result.stderr.strip()}")
+    return json.loads(result.stdout) if result.stdout.strip() else []
+
+
+class Plan:
+    """The actions to take, run unless the program is only asked to plan."""
+
+    def __init__(self, dry_run):
+        self.dry_run = dry_run
+        self.actions = []
+
+    def do(self, description, command):
+        self.actions.append(description)
+        if self.dry_run:
+            return
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            raise Error(f"{' '.join(command)}: {result.stderr.strip()}")
+
+
+def load(path):
+    """Read a description from a file, or from the standard input with "-"."""
+    if path == "-":
+        config = json.load(sys.stdin)
+    else:
+        with open(path, encoding="utf-8") as handle:
+            config = json.load(handle)
+    name = config.get("name", "")
+    if not NAMESPACE_PATTERN.match(name):
+        raise Error(f"invalid namespace name {name!r}")
+    for interface in config.get("interfaces", []):
+        for key in ("name", "host_name"):
+            if not NAME_PATTERN.match(interface.get(key, "")):
+                raise Error(f"invalid interface name {interface.get(key)!r}: 15 characters at most")
+    return config
+
+
+def marker(config):
+    return MARKER_PREFIX + config["name"]
+
+
+def namespaces():
+    return {entry["name"] for entry in ip("netns", "list")}
+
+
+def links(namespace=None):
+    """The interfaces of the host or of a namespace, by name."""
+    if namespace and namespace not in namespaces():
+        return {}
+    return {link["ifname"]: link for link in ip("link", "show", namespace=namespace)}
+
+
+def addresses(namespace, interface):
+    """The addresses of an interface, without the IPv6 link-local ones."""
+    if namespace and namespace not in namespaces():
+        return set()
+    found = set()
+    for entry in ip("addr", "show", "dev", interface, namespace=namespace):
+        for address in entry.get("addr_info", []):
+            if address["family"] == "inet6" and address.get("scope") == "link":
+                continue
+            found.add(str(ipaddress.ip_interface(f"{address['local']}/{address['prefixlen']}")))
+    return found
+
+
+def normalize_destination(destination):
+    if destination == "default":
+        return destination
+    return str(ipaddress.ip_network(destination, strict=False))
+
+
+def family_of(route):
+    """The IP version of a route, from its gateway or else its destination."""
+    if route.get("via"):
+        return ipaddress.ip_address(route["via"]).version
+    if route["to"] == "default":
+        return 4
+    return ipaddress.ip_network(route["to"], strict=False).version
+
+
+def normalize_metric(version, metric):
+    # IPv6 shows the metric 1024 of a route that was given none.
+    return None if version == 6 and metric == 1024 else metric
+
+
+def route_key(route):
+    return (
+        normalize_destination(route["to"]),
+        route.get("via"),
+        route["dev"],
+        normalize_metric(family_of(route), route.get("metric")),
+    )
+
+
+def current_routes(namespace, interfaces):
+    """The static routes of the interfaces of a namespace, as route keys."""
+    if namespace not in namespaces():
+        return set()
+    found = set()
+    for family in ("-4", "-6"):
+        for route in ip(family, "route", "show", namespace=namespace):
+            # ip omits the protocol of a route installed by hand: it is "boot".
+            if (
+                route.get("protocol", "boot") not in STATIC_PROTOCOLS
+                or route.get("dev") not in interfaces
+            ):
+                continue
+            found.add(
+                (
+                    normalize_destination(route["dst"]),
+                    route.get("gateway"),
+                    route["dev"],
+                    normalize_metric(6 if family == "-6" else 4, route.get("metric")),
+                )
+            )
+    return found
+
+
+def sysctl_value(namespace, key):
+    result = subprocess.run(
+        ["ip", "netns", "exec", namespace, "sysctl", "-n", key],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise Error(f"sysctl {key} in {namespace}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def state_file(state_dir, name):
+    return os.path.join(state_dir, name)
+
+
+def own_links(config):
+    """The interfaces of the host that carry the marker of this namespace."""
+    return {name: link for name, link in links().items() if link.get("ifalias") == marker(config)}
+
+
+def ensure_namespace(config, plan, state_dir):
+    name = config["name"]
+    if name in namespaces():
+        owned = os.path.exists(state_file(state_dir, name)) or bool(own_links(config))
+        if not owned:
+            raise Error(
+                f"the namespace {name} exists and was not created by this program: "
+                "refusing to take it over"
+            )
+        return
+    plan.do(f"create the namespace {name}", ["ip", "netns", "add", name])
+    if not plan.dry_run:
+        os.makedirs(state_dir, exist_ok=True)
+        with open(state_file(state_dir, name), "w", encoding="utf-8") as handle:
+            handle.write("created by goabonga-netns\n")
+
+
+def ensure_link(config, interface, plan):
+    name = config["name"]
+    host_name = interface["host_name"]
+    peer = interface["name"]
+    host_links = links()
+    namespace_links = links(name)
+
+    host_link = host_links.get(host_name)
+    peer_link = namespace_links.get(peer)
+    if host_link is not None and host_link.get("ifalias") != marker(config):
+        raise Error(
+            f"the interface {host_name} exists on the host and is not managed by "
+            f"the namespace {name}"
+        )
+    if peer_link is not None and peer_link.get("ifalias") != marker(config):
+        raise Error(
+            f"the interface {peer} exists in the namespace {name} and is not "
+            "managed by this program"
+        )
+    # A veth pair is created and deleted as a whole: an end alone is a leftover.
+    if (host_link is None) != (peer_link is None):
+        leftover = host_name if host_link is not None else peer
+        where = None if host_link is not None else name
+        command = ["ip", "link", "del", "dev", leftover]
+        if where:
+            command = ["ip", "-n", where, "link", "del", "dev", leftover]
+        plan.do(f"delete the lonely end {leftover}", command)
+        host_link = peer_link = None
+    if host_link is None:
+        ensure_no_host_overlap(interface)
+        plan.do(
+            f"create the pair {host_name} <-> {name}/{peer}",
+            [
+                "ip",
+                "link",
+                "add",
+                host_name,
+                "type",
+                "veth",
+                "peer",
+                "name",
+                peer,
+                "netns",
+                name,
+            ],
+        )
+        plan.do(
+            f"mark {host_name}",
+            ["ip", "link", "set", "dev", host_name, "alias", marker(config)],
+        )
+        plan.do(
+            f"mark {name}/{peer}",
+            ["ip", "-n", name, "link", "set", "dev", peer, "alias", marker(config)],
+        )
+
+
+def ensure_attributes(config, interface, plan):
+    name = config["name"]
+    host_name = interface["host_name"]
+    peer = interface["name"]
+    host_link = links().get(host_name)
+    peer_link = links(name).get(peer)
+
+    mtu = interface.get("mtu")
+    for where, ifname, link in ((None, host_name, host_link), (name, peer, peer_link)):
+        prefix = ["ip", "-n", where] if where else ["ip"]
+        label = f"{where}/{ifname}" if where else ifname
+        if mtu and (link is None or link.get("mtu") != mtu):
+            plan.do(
+                f"set the MTU of {label} to {mtu}",
+                prefix + ["link", "set", "dev", ifname, "mtu", str(mtu)],
+            )
+        wanted = {
+            str(ipaddress.ip_interface(a))
+            for a in (
+                interface.get("host_addresses") if where is None else interface.get("addresses")
+            )
+            or []
+        }
+        have = addresses(where, ifname) if link is not None else set()
+        for address in sorted(have - wanted):
+            plan.do(
+                f"remove {address} from {label}", prefix + ["addr", "del", address, "dev", ifname]
+            )
+        for address in sorted(wanted - have):
+            command = prefix + ["addr", "add", address, "dev", ifname]
+            if ipaddress.ip_interface(address).version == 6:
+                # No duplicate address detection on a link made of two ends we own.
+                command.append("nodad")
+            plan.do(f"add {address} to {label}", command)
+        if link is None or "UP" not in link.get("flags", []):
+            plan.do(f"set {label} up", prefix + ["link", "set", "dev", ifname, "up"])
+
+
+def ensure_loopback(config, plan):
+    name = config["name"]
+    lo = links(name).get("lo")
+    if config.get("loopback", True) and (lo is None or "UP" not in lo.get("flags", [])):
+        plan.do(
+            f"set the loopback of {name} up", ["ip", "-n", name, "link", "set", "dev", "lo", "up"]
+        )
+
+
+def ensure_routes(config, plan):
+    name = config["name"]
+    interfaces = {interface["name"] for interface in config.get("interfaces", [])}
+    wanted = {}
+    for interface in config.get("interfaces", []):
+        for route in interface.get("routes", []):
+            full = {**route, "dev": interface["name"]}
+            wanted[route_key(full)] = full
+    have = current_routes(name, interfaces)
+    for key in sorted(have - set(wanted), key=str):
+        destination, via, device, metric = key
+        command = ["ip", "-n", name, "route", "del", destination]
+        if via:
+            command += ["via", via]
+        command += ["dev", device]
+        if metric is not None:
+            command += ["metric", str(metric)]
+        plan.do(f"remove the route {destination} from {name}", command)
+    for key in sorted(set(wanted) - have, key=str):
+        route = wanted[key]
+        command = ["ip", "-n", name, "route", "replace", route["to"]]
+        if route.get("via"):
+            command += ["via", route["via"]]
+        command += ["dev", route["dev"]]
+        if route.get("metric") is not None:
+            command += ["metric", str(route["metric"])]
+        plan.do(f"add the route {route['to']} to {name}", command)
+
+
+def ensure_sysctl(config, plan):
+    name = config["name"]
+    for key, value in sorted(config.get("sysctl", {}).items()):
+        if name in namespaces() and sysctl_value(name, key) == str(value):
+            continue
+        plan.do(
+            f"set {key}={value} in {name}",
+            ["ip", "netns", "exec", name, "sysctl", "-qw", f"{key}={value}"],
+        )
+
+
+def remove_unwanted_links(config, plan):
+    """Delete the pairs this namespace used to have and no longer declares."""
+    wanted = {interface["host_name"] for interface in config.get("interfaces", [])}
+    for host_name in sorted(set(own_links(config)) - wanted):
+        plan.do(
+            f"delete the interface {host_name}, no longer declared",
+            ["ip", "link", "del", "dev", host_name],
+        )
+
+
+def subnets(interface):
+    """The networks an interface is on, on both of its ends."""
+    found = set()
+    for key in ("addresses", "host_addresses"):
+        for address in interface.get(key) or []:
+            found.add(ipaddress.ip_interface(address).network)
+    return found
+
+
+def validate(configs):
+    """Every problem of a set of descriptions, found without touching the host."""
+    problems = []
+    seen_namespaces = set()
+    seen_host_names = {}
+    claimed = []  # (network, label) of every interface, to find the overlaps
+    for config in configs:
+        name = config.get("name", "")
+        if not NAMESPACE_PATTERN.match(name):
+            problems.append(f"invalid namespace name {name!r}")
+            continue
+        if name in seen_namespaces:
+            problems.append(f"the namespace {name} is declared twice")
+        seen_namespaces.add(name)
+        names = set()
+        for interface in config.get("interfaces", []):
+            label = f"{name}/{interface.get('name')}"
+            for key in ("name", "host_name"):
+                if not NAME_PATTERN.match(interface.get(key) or ""):
+                    problems.append(
+                        f"{label}: invalid {key} {interface.get(key)!r}: 15 characters at most"
+                    )
+            if interface.get("name") in names:
+                problems.append(f"{name}: the interface {interface.get('name')} is declared twice")
+            names.add(interface.get("name"))
+            host_name = interface.get("host_name")
+            if host_name in seen_host_names:
+                problems.append(
+                    f"the host interface {host_name} is used by {seen_host_names[host_name]} and {label}"
+                )
+            seen_host_names[host_name] = label
+            networks = set()
+            for key in ("addresses", "host_addresses"):
+                for address in interface.get(key) or []:
+                    try:
+                        networks.add(ipaddress.ip_interface(address).network)
+                    except ValueError:
+                        problems.append(f"{label}: invalid address {address!r}")
+            for route in interface.get("routes", []):
+                via = route.get("via")
+                if via:
+                    try:
+                        gateway = ipaddress.ip_address(via)
+                    except ValueError:
+                        problems.append(f"{label}: invalid gateway {via!r}")
+                        continue
+                    own = {
+                        ipaddress.ip_interface(a).network for a in interface.get("addresses") or []
+                    }
+                    if not any(gateway in network for network in own):
+                        problems.append(
+                            f"{label}: the gateway {via} is on none of the networks of the interface"
+                        )
+                try:
+                    normalize_destination(route["to"])
+                except (ValueError, KeyError):
+                    problems.append(f"{label}: invalid route destination {route.get('to')!r}")
+            for network in networks:
+                claimed.append((network, label))
+    for config in configs:
+        defaults = {}
+        for interface in config.get("interfaces", []):
+            for route in interface.get("routes", []):
+                if route.get("to") == "default" and route.get("via"):
+                    try:
+                        version = ipaddress.ip_address(route["via"]).version
+                    except ValueError:
+                        continue
+                    key = (version, route.get("metric"))
+                    defaults.setdefault(key, []).append(interface.get("name"))
+        for (version, metric), owners in defaults.items():
+            if len(owners) > 1:
+                problems.append(
+                    f"{config.get('name')}: {len(owners)} IPv{version} default routes with the "
+                    f"same metric ({metric}), on {', '.join(owners)}"
+                )
+    for index, (network, label) in enumerate(claimed):
+        for other, other_label in claimed[index + 1 :]:
+            if (
+                label != other_label
+                and network.version == other.version
+                and network.overlaps(other)
+            ):
+                problems.append(f"{label} ({network}) and {other_label} ({other}) overlap")
+    return sorted(set(problems))
+
+
+def ensure_no_host_overlap(interface):
+    """Refuse an address that overlaps a network the host is already on elsewhere."""
+    host_name = interface["host_name"]
+    for address in interface.get("host_addresses") or []:
+        network = ipaddress.ip_interface(address).network
+        for family in ("-4", "-6"):
+            for route in ip(family, "route", "show"):
+                destination = route.get("dst")
+                if destination in (None, "default") or route.get("dev") == host_name:
+                    continue
+                other = ipaddress.ip_network(destination, strict=False)
+                if other.version == network.version and other.overlaps(network):
+                    raise Error(
+                        f"{address} on {host_name} overlaps {destination}, "
+                        f"which the host already uses on {route.get('dev')}"
+                    )
+
+
+def apply(config, dry_run, state_dir):
+    plan = Plan(dry_run)
+    ensure_namespace(config, plan, state_dir)
+    remove_unwanted_links(config, plan)
+    for interface in config.get("interfaces", []):
+        ensure_link(config, interface, plan)
+        ensure_attributes(config, interface, plan)
+    ensure_loopback(config, plan)
+    ensure_routes(config, plan)
+    ensure_sysctl(config, plan)
+    return plan.actions
+
+
+def check(config, state_dir):
+    """The problems that keep the namespace from matching its description."""
+    problems = []
+    try:
+        problems += apply(config, True, state_dir)
+    except Error as error:
+        problems.append(str(error))
+        return problems
+    name = config["name"]
+    for interface in config.get("interfaces", []):
+        for where, ifname in ((None, interface["host_name"]), (name, interface["name"])):
+            link = links(where).get(ifname)
+            if link is not None and link.get("operstate") != "UP":
+                label = f"{where}/{ifname}" if where else ifname
+                problems.append(f"{label} is {link.get('operstate')}, not UP")
+    return problems
+
+
+def down(config, force, dry_run, state_dir):
+    name = config["name"]
+    plan = Plan(dry_run)
+    if name not in namespaces():
+        return plan.actions
+    owned = os.path.exists(state_file(state_dir, name)) or bool(own_links(config))
+    if not owned:
+        raise Error(f"the namespace {name} was not created by this program: refusing to delete it")
+    pids = subprocess.run(
+        ["ip", "netns", "pids", name], capture_output=True, text=True, check=False
+    ).stdout.split()
+    if pids and not force:
+        raise Error(
+            f"the namespace {name} is used by the processes {', '.join(pids)}: "
+            "stop them, or use --force"
+        )
+    for host_name in sorted(own_links(config)):
+        plan.do(f"delete the interface {host_name}", ["ip", "link", "del", "dev", host_name])
+    plan.do(f"delete the namespace {name}", ["ip", "netns", "del", name])
+    if not dry_run and os.path.exists(state_file(state_dir, name)):
+        os.remove(state_file(state_dir, name))
+    return plan.actions
+
+
+def main(argv=None):
+    os.environ["PATH"] = SAFE_PATH
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--state-dir", default="/run/goabonga-netns", help=argparse.SUPPRESS)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("validate")
+    for name in ("apply", "check", "down"):
+        sub = commands.add_parser(name)
+        sub.add_argument("config")
+        if name != "check":
+            sub.add_argument("--dry-run", action="store_true")
+        if name == "down":
+            sub.add_argument("--force", action="store_true")
+    arguments = parser.parse_args(argv)
+    if arguments.command == "validate":
+        try:
+            configs = json.load(sys.stdin)["namespaces"]
+        except (ValueError, KeyError, TypeError) as error:
+            print(json.dumps({"error": f"unreadable input: {error}"}), file=sys.stderr)
+            return 2
+        problems = validate(configs)
+        print(json.dumps({"ok": not problems, "problems": problems}))
+        return 0 if not problems else 1
+    try:
+        config = load(arguments.config)
+        if arguments.command == "apply":
+            print(json.dumps({"actions": apply(config, arguments.dry_run, arguments.state_dir)}))
+        elif arguments.command == "down":
+            actions = down(config, arguments.force, arguments.dry_run, arguments.state_dir)
+            print(json.dumps({"actions": actions}))
+        else:
+            problems = check(config, arguments.state_dir)
+            print(json.dumps({"ok": not problems, "problems": problems}))
+            return 0 if not problems else 1
+    except Error as error:
+        print(json.dumps({"error": str(error)}), file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

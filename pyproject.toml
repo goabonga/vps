@@ -17,6 +17,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ansible-lint>=25",
+    "pytest>=8",
 ]
 
 [tool.uv]
