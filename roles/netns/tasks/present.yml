@@ -1,0 +1,68 @@
+---
+- name: Write the description of the namespace
+  ansible.builtin.copy:
+    dest: "{{ netns_config_dir }}/{{ netns_item.name }}.json"
+    content: "{{ lookup('ansible.builtin.template', 'namespace.json.j2') }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Create the directory of the DNS configuration
+  ansible.builtin.file:
+    path: "{{ netns_dns_dir }}/{{ netns_item.name }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: netns_item.dns | default({}) | length > 0
+
+- name: Write the DNS configuration
+  ansible.builtin.template:
+    src: resolv.conf.j2
+    dest: "{{ netns_dns_dir }}/{{ netns_item.name }}/resolv.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: netns_item.dns | default({}) | length > 0
+
+- name: Remove the DNS configuration that is no longer declared
+  ansible.builtin.file:
+    path: "{{ netns_dns_dir }}/{{ netns_item.name }}/resolv.conf"
+    state: absent
+  become: true
+  when: netns_item.dns | default({}) | length == 0
+
+# The program is the only thing that knows how to read the network: asking it to
+# plan (--dry-run, which changes nothing) is how to know whether a run changes
+# something, and its answer is exact in check mode too, because the description
+# reaches it through the standard input instead of the file.
+- name: Plan the changes of the namespace
+  ansible.builtin.command:
+    argv: "{{ [netns_helper, 'apply', '-', '--dry-run'] }}"
+    stdin: "{{ lookup('ansible.builtin.template', 'namespace.json.j2') }}"
+  register: netns_plan
+  changed_when: false
+  failed_when: netns_plan.rc != 0
+  check_mode: false
+  become: true
+
+- name: Apply the changes of the namespace
+  ansible.builtin.command:
+    argv: "{{ [netns_helper, 'apply', '-'] }}"
+    stdin: "{{ lookup('ansible.builtin.template', 'namespace.json.j2') }}"
+  register: netns_applied
+  # The program reports what it did: nothing to do means nothing changed.
+  changed_when: (netns_plan.stdout | from_json).actions | length > 0
+  when: (netns_plan.stdout | from_json).actions | length > 0
+  become: true
+
+- name: Enable the unit of the namespace and start it
+  ansible.builtin.systemd_service:
+    name: "{{ netns_unit | replace('@', '@' ~ netns_item.name) }}"
+    daemon_reload: true
+    enabled: true
+    state: started
+  become: true

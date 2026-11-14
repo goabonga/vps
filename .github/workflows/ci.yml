@@ -229,3 +229,30 @@ jobs:
         env:
           JOB_STATUS: ${{ job.status }}
         run: scripts/summary.sh "infra docs (terraform-docs)" "$JOB_STATUS" --file infra-docs.txt
+
+  netns:
+    name: netns
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - run: uv sync --frozen
+      # The tests run the real program in namespaces of their own, created without
+      # privileges: Ubuntu restricts that with AppArmor.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: pytest
+        env:
+          # A sandbox that is not available fails the tests instead of skipping them.
+          NETNS_REQUIRE_SANDBOX: "1"
+        run: uv run --no-sync pytest tests/unit 2>&1 | tee netns.txt
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: scripts/summary.sh "netns tests (pytest)" "$JOB_STATUS" --file netns.txt

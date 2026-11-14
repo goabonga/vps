@@ -1,0 +1,12 @@
+# Managed by Ansible (goabonga.vps.netns): changes are overwritten.
+# Read by `ip netns exec {{ netns_item.name }}` and, through the attach tasks, by
+# the services running in the namespace.
+{% for server in netns_item.dns.nameservers | default([]) %}
+nameserver {{ server }}
+{% endfor %}
+{% if netns_item.dns.search | default([]) | length > 0 %}
+search {{ netns_item.dns.search | join(' ') }}
+{% endif %}
+{% if netns_item.dns.options | default([]) | length > 0 %}
+options {{ netns_item.dns.options | join(' ') }}
+{% endif %}

@@ -1,0 +1,32 @@
+{#- The description of one namespace (netns_item) that the program reads. -#}
+{%- set interfaces = [] -%}
+{%- for interface in netns_item.interfaces | default([]) -%}
+{%- set addresses = [] -%}
+{%- set host_addresses = [] -%}
+{%- set routes = [] -%}
+{%- for family in ['ipv4', 'ipv6'] -%}
+{%- if interface[family] is defined and interface[family] -%}
+{%- set _ = addresses.append(interface[family].address) -%}
+{%- if interface[family].gateway | default(none) and interface.default_route | default(true) -%}
+{%- set _ = routes.append({'to': 'default', 'via': interface[family].gateway}) -%}
+{%- endif -%}
+{%- endif -%}
+{%- if interface['host_' ~ family] is defined and interface['host_' ~ family] -%}
+{%- set _ = host_addresses.append(interface['host_' ~ family].address) -%}
+{%- endif -%}
+{%- endfor -%}
+{%- for route in interface.routes | default([]) -%}
+{%- set entry = {'to': route.to} -%}
+{%- if route.via | default(none) -%}{%- set _ = entry.update({'via': route.via}) -%}{%- endif -%}
+{%- if route.metric | default(none) is not none -%}{%- set _ = entry.update({'metric': route.metric}) -%}{%- endif -%}
+{%- set _ = routes.append(entry) -%}
+{%- endfor -%}
+{%- set item = {'name': interface.name, 'host_name': interface.host_name,
+                'addresses': addresses, 'host_addresses': host_addresses, 'routes': routes} -%}
+{%- if interface.mtu | default(none) -%}{%- set _ = item.update({'mtu': interface.mtu}) -%}{%- endif -%}
+{%- set _ = interfaces.append(item) -%}
+{%- endfor -%}
+{{ {'name': netns_item.name,
+    'loopback': netns_item.loopback | default(true),
+    'sysctl': netns_item.sysctl | default({}),
+    'interfaces': interfaces} | to_nice_json(indent=2, sort_keys=True) }}

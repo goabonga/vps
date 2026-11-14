@@ -67,6 +67,7 @@ A scope is a module, in kebab-case. Only these exist, and `feat`, `fix`, `docs` 
   `playbooks/site.yml`).
 - `sysctl`: the `sysctl` role (`roles/sysctl/` and its line in
   `playbooks/site.yml`).
+- `netns`: the `netns` role (`roles/netns/` and its line in `playbooks/site.yml`).
 
 ## Checking a change
 
@@ -75,6 +76,7 @@ Run the checks on the working tree, then try the change on the development VM
 
 ```sh
 uv run ansible-lint
+uv run pytest tests/unit
 scripts/install-collection.sh local
 uv run ansible-playbook -i inventories/development --syntax-check goabonga.vps.site
 uv tool run multicz validate --strict

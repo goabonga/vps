@@ -1,0 +1,77 @@
+---
+- name: Look for the units that need the namespace
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - --property=RequiredBy,BoundBy
+      - --value
+      - "{{ netns_unit | replace('@', '@' ~ netns_name) }}"
+  register: netns_dependents
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Refuse to delete a namespace that units need
+  ansible.builtin.assert:
+    that:
+      - (netns_dependents.stdout | trim | length == 0) or (netns_force_remove | bool)
+    fail_msg: >-
+      The namespace {{ netns_name }} is needed by {{ netns_dependents.stdout | trim }}:
+      remove their dependency first, or set netns_force_remove.
+    quiet: true
+
+# The program refuses on its own when a process still uses the namespace, and
+# never deletes a namespace or an interface it did not create.
+- name: Plan the deletion of the namespace
+  ansible.builtin.command:
+    argv: "{{ [netns_helper, 'down', '-', '--dry-run'] + (['--force'] if netns_force_remove | bool else []) }}"
+    stdin: "{{ {'name': netns_name} | to_json }}"
+  register: netns_down_plan
+  changed_when: false
+  failed_when: netns_down_plan.rc != 0
+  check_mode: false
+  become: true
+
+- name: Delete the namespace
+  ansible.builtin.command:
+    argv: "{{ [netns_helper, 'down', '-'] + (['--force'] if netns_force_remove | bool else []) }}"
+    stdin: "{{ {'name': netns_name} | to_json }}"
+  changed_when: (netns_down_plan.stdout | from_json).actions | length > 0
+  when: (netns_down_plan.stdout | from_json).actions | length > 0
+  become: true
+
+- name: Stop and disable the unit of the namespace
+  ansible.builtin.systemd_service:
+    name: "{{ netns_unit | replace('@', '@' ~ netns_name) }}"
+    enabled: false
+    state: stopped
+  become: true
+  failed_when: false
+
+- name: Remove the description of the namespace
+  ansible.builtin.file:
+    path: "{{ netns_config_dir }}/{{ netns_name }}.json"
+    state: absent
+  become: true
+
+- name: Remove the DNS configuration of the namespace
+  ansible.builtin.file:
+    path: "{{ netns_dns_dir }}/{{ netns_name }}/resolv.conf"
+    state: absent
+  become: true
+
+- name: Look for what else its directory holds
+  ansible.builtin.find:
+    paths: "{{ netns_dns_dir }}/{{ netns_name }}"
+    file_type: any
+  register: netns_leftovers
+  become: true
+
+# Only an empty directory is removed: the role never deletes a file of someone else.
+- name: Remove the directory of the namespace when it is empty
+  ansible.builtin.file:
+    path: "{{ netns_dns_dir }}/{{ netns_name }}"
+    state: absent
+  become: true
+  when: netns_leftovers.matched | default(0) == 0

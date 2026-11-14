@@ -5,3 +5,4 @@
   roles:
     - goabonga.vps.version
     - goabonga.vps.sysctl
+    - goabonga.vps.netns

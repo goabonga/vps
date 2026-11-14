@@ -1,0 +1,50 @@
+---
+# Set to false to leave the host untouched.
+netns_enabled: true
+
+# The network namespaces to manage, each with its veth pairs, its addresses, its
+# routes and its DNS. A namespace is declared as, for example:
+#
+#   - name: squid
+#     interfaces:
+#       - name: eth0
+#         host_name: veth-squid
+#         ipv4:
+#           address: 10.200.3.2/30
+#           gateway: 10.200.3.1
+#         host_ipv4:
+#           address: 10.200.3.1/30
+#     dns:
+#       nameservers: [10.200.2.2]
+#
+# See the README for every key. Nothing is created until a namespace is declared.
+netns_namespaces: []
+
+# Turn on the routing of IPv4 and of IPv6 packets between the interfaces of the
+# host, which is how the namespaces reach each other. The role never turns them
+# on by itself, and never turns them off.
+netns_ip_forward: false
+netns_ipv6_forward: false
+
+# Delete the namespaces the role created that are no longer declared. Off by
+# default: a namespace that is not declared is left alone.
+netns_prune: false
+
+# Allow the deletion of a namespace that processes or units still use.
+netns_force_remove: false
+
+# Check that the namespaces work once they are configured, and fail when they
+# do not.
+netns_verify: true
+
+# Where the description of each namespace is kept, and the file of the DNS
+# servers each one reads (/etc/netns/<namespace>/resolv.conf).
+netns_config_dir: /etc/goabonga-netns
+netns_dns_dir: /etc/netns
+
+# The program that applies a description, and the unit that applies it at boot.
+netns_helper: /usr/local/sbin/goabonga-netns
+netns_unit: goabonga-netns@.service
+
+# The sysctl file written when the routing is turned on.
+netns_sysctl_file: /etc/sysctl.d/90-goabonga-netns.conf

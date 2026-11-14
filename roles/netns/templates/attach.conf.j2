@@ -1,0 +1,14 @@
+# Managed by Ansible (goabonga.vps.netns): changes are overwritten.
+# Runs the service in the namespace {{ netns_attach_namespace }}, once it exists.
+[Unit]
+Requires=goabonga-netns@{{ netns_attach_namespace }}.service
+After=goabonga-netns@{{ netns_attach_namespace }}.service
+
+[Service]
+NetworkNamespacePath=/run/netns/{{ netns_attach_namespace }}
+{% if netns_attach_dns | default(true) | bool %}
+# NetworkNamespacePath= does not apply /etc/netns/<name>/resolv.conf, which only
+# `ip netns exec` reads: bind it onto the resolv.conf of the service, in its own
+# mount namespace, whatever manages the one of the host.
+BindReadOnlyPaths={{ netns_dns_dir }}/{{ netns_attach_namespace }}/resolv.conf:/etc/resolv.conf
+{% endif %}

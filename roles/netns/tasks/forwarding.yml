@@ -1,0 +1,19 @@
+---
+# The namespaces reach each other through the routing of the host. The role
+# turns it on only when asked, and never turns it off: something else, such as
+# Kubernetes, may need it.
+- name: Turn on the routing
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "1"
+    sysctl_file: "{{ netns_sysctl_file }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - { name: net.ipv4.ip_forward, enabled: "{{ netns_ip_forward }}" }
+    - { name: net.ipv6.conf.all.forwarding, enabled: "{{ netns_ipv6_forward }}" }
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.enabled | bool
+  become: true

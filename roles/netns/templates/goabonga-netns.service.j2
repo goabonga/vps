@@ -1,0 +1,23 @@
+# Managed by Ansible (goabonga.vps.netns): changes are overwritten.
+[Unit]
+Description=Network namespace %i
+Documentation=man:ip-netns(8)
+
+[Service]
+# A namespace is made of kernel objects, not of a process: the unit applies the
+# description and stays active while they exist. Applying it is idempotent, so
+# starting it again changes nothing.
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ netns_helper }} apply {{ netns_config_dir }}/%i.json
+# The unit is active only when the network really matches the description.
+ExecStartPost={{ netns_helper }} check {{ netns_config_dir }}/%i.json
+ExecReload={{ netns_helper }} apply {{ netns_config_dir }}/%i.json
+# Refused while a process still uses the namespace.
+ExecStop={{ netns_helper }} down {{ netns_config_dir }}/%i.json
+
+# No mount sandboxing here: `ip netns add` binds a file of /run/netns, which the
+# other units must see.
+
+[Install]
+WantedBy=multi-user.target
